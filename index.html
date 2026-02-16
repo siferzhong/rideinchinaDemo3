@@ -1,0 +1,164 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Ride In China</title>
+  
+  <!-- PWA Meta Tags -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <!-- iOS PWA 配置 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="RideChina">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3195/3195861.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="https://cdn-icons-png.flaticon.com/512/3195/3195861.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://cdn-icons-png.flaticon.com/512/3195/3195861.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="https://cdn-icons-png.flaticon.com/512/3195/3195861.png">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script type="text/javascript">
+    window._AMapSecurityConfig = {
+      securityJsCode: 'c3ed4aee4cbbcbc4fe3cfd001dbeb11f', 
+    };
+  </script>
+  <script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=7669d040ad427ec4d361f7bbd152e6e3&plugin=AMap.Autocomplete,AMap.PlaceSearch,AMap.Driving"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { 
+      font-family: 'Inter', sans-serif; 
+      -webkit-tap-highlight-color: transparent; 
+      margin: 0; padding: 0; 
+      background-color: #0f172a;
+      /* 防止在手机上橡皮筋回弹效果 */
+      overscroll-behavior-y: contain;
+    }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .amap-logo, .amap-copyright { display: none !important; opacity: 0 !important; visibility: hidden !important; }
+    
+    @keyframes slide-up {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-slide-up { animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    
+    @keyframes pulse-orange {
+      0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); }
+      70% { box-shadow: 0 0 0 15px rgba(249, 115, 22, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
+    }
+    .dest-pulse { animation: pulse-orange 2s infinite; }
+    
+    /* 适配刘海屏 */
+    header {
+      padding-top: env(safe-area-inset-top);
+    }
+    nav {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    
+    /* WordPress内容样式 */
+    .wordpress-content {
+      font-size: 15px;
+      line-height: 1.7;
+      color: #334155;
+    }
+    .wordpress-content h1,
+    .wordpress-content h2,
+    .wordpress-content h3,
+    .wordpress-content h4 {
+      font-weight: 700;
+      margin-top: 1.5em;
+      margin-bottom: 0.75em;
+      color: #1e293b;
+    }
+    .wordpress-content h1 { font-size: 1.75em; }
+    .wordpress-content h2 { font-size: 1.5em; }
+    .wordpress-content h3 { font-size: 1.25em; }
+    .wordpress-content p {
+      margin-bottom: 1em;
+    }
+    .wordpress-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 12px;
+      margin: 1.5em 0;
+    }
+    .wordpress-content ul,
+    .wordpress-content ol {
+      margin: 1em 0;
+      padding-left: 1.5em;
+    }
+    .wordpress-content li {
+      margin-bottom: 0.5em;
+    }
+    .wordpress-content a {
+      color: #f97316;
+      text-decoration: underline;
+    }
+    .wordpress-content blockquote {
+      border-left: 4px solid #f97316;
+      padding-left: 1em;
+      margin: 1.5em 0;
+      font-style: italic;
+      color: #64748b;
+    }
+    .wordpress-content code {
+      background: #f1f5f9;
+      padding: 0.2em 0.4em;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    .wordpress-content pre {
+      background: #f1f5f9;
+      padding: 1em;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1.5em 0;
+    }
+    .wordpress-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5em 0;
+    }
+    .wordpress-content th,
+    .wordpress-content td {
+      padding: 0.75em;
+      border: 1px solid #e2e8f0;
+      text-align: left;
+    }
+    .wordpress-content th {
+      background: #f8fafc;
+      font-weight: 600;
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^18.2.0",
+    "react-dom": "https://esm.sh/react-dom@^18.2.0",
+    "react-dom/": "https://esm.sh/react-dom@^18.2.0/",
+    "react/": "https://esm.sh/react@^18.2.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>

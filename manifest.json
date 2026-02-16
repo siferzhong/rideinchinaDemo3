@@ -1,0 +1,89 @@
+{
+  "name": "Ride In China - Moto Tour Companion",
+  "short_name": "RideChina",
+  "description": "The ultimate companion for international motorcycle riders in China. Access curated routes, group navigation with real-time location sharing, and secure document management.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#f97316",
+  "orientation": "portrait",
+  "categories": ["travel", "navigation", "lifestyle"],
+  "screenshots": [],
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start Navigation",
+      "short_name": "Navigate",
+      "description": "Start a new ride navigation",
+      "url": "/?action=navigate",
+      "icons": [
+        {
+          "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "View Routes",
+      "short_name": "Routes",
+      "description": "Browse curated motorcycle routes",
+      "url": "/?action=routes",
+      "icons": [
+        {
+          "src": "https://cdn-icons-png.flaticon.com/512/3195/3195861.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ]
+}

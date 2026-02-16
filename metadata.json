@@ -1,0 +1,8 @@
+{
+  "name": "Ride In China - Moto Tour Companion",
+  "description": "The ultimate companion for international motorcycle riders in China. Access curated routes, group navigation with real-time location sharing, and secure document management for travel permits.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
