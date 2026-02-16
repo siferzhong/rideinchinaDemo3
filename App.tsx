@@ -5,7 +5,7 @@ import Home from './pages/Home';
 import Routes from './pages/Routes';
 import RideMap from './pages/RideMap';
 import Documents from './pages/Documents';
-import AIAssistant from './pages/AIAssistant';
+import Me from './pages/Me';
 import PhotoLive from './pages/PhotoLive';
 import InstallPrompt from './components/InstallPrompt';
 
@@ -18,7 +18,7 @@ const App: React.FC = () => {
       case AppTab.ROUTES: return <Routes />;
       case AppTab.MAP: return <RideMap />;
       case AppTab.DOCS: return <Documents />;
-      case AppTab.AI: return <AIAssistant />;
+      case AppTab.AI: return <Me />;
       case AppTab.GALLERY: return <PhotoLive />;
       default: return <Home onNavigate={setActiveTab} />;
     }
@@ -72,8 +72,8 @@ const App: React.FC = () => {
         />
         <NavButton 
           active={activeTab === AppTab.AI} 
-          icon="fa-robot" 
-          label="Guide" 
+          icon="fa-user" 
+          label="Me" 
           onClick={() => setActiveTab(AppTab.AI)} 
         />
       </nav>

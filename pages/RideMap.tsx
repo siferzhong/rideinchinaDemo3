@@ -39,6 +39,127 @@ const getManeuverIcon = (instruction: string) => {
   return 'fa-location-arrow';
 };
 
+/** 根据转向指令计算箭头旋转角度（度） */
+const getTurnArrowRotation = (instruction: string): number => {
+  const text = instruction.toLowerCase();
+  if (text.includes('left')) return -90; // 左转
+  if (text.includes('right')) return 90; // 右转
+  if (text.includes('u-turn') || text.includes('uturn')) return 180; // 掉头
+  if (text.includes('exit')) return 45; // 出口
+  return 0; // 直行
+};
+
+/** 启动路径动画（高亮流动效果） */
+const startRouteAnimation = (polyline: any) => {
+  let animationFrame: number | null = null;
+  let progress = 0;
+  
+  const animate = () => {
+    progress = (progress + 0.02) % 1; // 每帧前进2%
+    
+    // 使用strokeDasharray和strokeDashoffset实现流动效果
+    // 高德原生导航风格的路径高亮流动
+    if (polyline.setOptions) {
+      const dashLength = 30;
+      const gapLength = 10;
+      const offset = progress * (dashLength + gapLength);
+      
+      // 注意：AMap Polyline可能不支持strokeDasharray，这里使用透明度变化模拟
+      const opacity = 0.5 + Math.sin(progress * Math.PI * 2) * 0.3;
+      polyline.setOptions({
+        strokeOpacity: opacity,
+      });
+    }
+    
+    animationFrame = requestAnimationFrame(animate);
+  };
+  
+  animate();
+  
+  // 返回停止函数
+  return () => {
+    if (animationFrame) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+  };
+};
+
+/** 提取并显示导航提示（限速、摄像头、电子眼等） */
+const extractAndDisplayNavigationAlerts = (steps: any[], map: any, alertsRef: React.MutableRefObject<any[]>) => {
+  if (!map || !window.AMap) return;
+  
+  steps.forEach((step: any, idx: number) => {
+    const instruction = step.instruction || '';
+    const stepPath = step.path;
+    if (!stepPath || stepPath.length === 0) return;
+    
+    // 检查是否有限速信息（高德API可能包含在road字段中）
+    const speedLimitMatch = instruction.match(/(\d+)\s*km\/h|限速\s*(\d+)/i);
+    if (speedLimitMatch) {
+      const speedLimit = speedLimitMatch[1] || speedLimitMatch[2];
+      const alertPos = stepPath[Math.floor(stepPath.length / 2)]; // 在路径中点显示
+      const pos = alertPos.lng != null 
+        ? [alertPos.lng, alertPos.lat] 
+        : [alertPos[0], alertPos[1]];
+      
+      const speedMarker = new window.AMap.Marker({
+        position: pos,
+        map: map,
+        content: `
+          <div style="
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: bold;
+            border: 2px solid white;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+            white-space: nowrap;
+          ">
+            <i class="fa-solid fa-gauge-high" style="margin-right: 2px;"></i>
+            ${speedLimit}km/h
+          </div>
+        `,
+        offset: new window.AMap.Pixel(-20, -10),
+        zIndex: 55,
+      });
+      alertsRef.current.push(speedMarker);
+    }
+    
+    // 检查是否有摄像头/电子眼提示
+    if (instruction.match(/摄像头|电子眼|监控|测速/i)) {
+      const alertPos = stepPath[Math.floor(stepPath.length / 2)];
+      const pos = alertPos.lng != null 
+        ? [alertPos.lng, alertPos.lat] 
+        : [alertPos[0], alertPos[1]];
+      
+      const cameraMarker = new window.AMap.Marker({
+        position: pos,
+        map: map,
+        content: `
+          <div style="
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            padding: 4px 6px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: bold;
+            border: 2px solid white;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+          ">
+            <i class="fa-solid fa-camera"></i>
+          </div>
+        `,
+        offset: new window.AMap.Pixel(-10, -10),
+        zIndex: 55,
+      });
+      alertsRef.current.push(cameraMarker);
+    }
+  });
+};
+
 const getDistance = (p1: [number, number] | null, p2: [number, number] | null) => {
   if (!window.AMap || !p1 || !p2) return 0;
   return window.AMap.GeometryUtil.distance(p1, p2) / 1000;
@@ -63,6 +184,9 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<Aud
   return buffer;
 }
 
+// 路径动画控制（全局，避免重复创建）
+let routeAnimationController: (() => void) | null = null;
+
 const RideMap: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -72,6 +196,9 @@ const RideMap: React.FC = () => {
   const waypointMarkerRef = useRef<any>(null);
   const routeRef = useRef<any>(null);
   const customRoutePolylineRef = useRef<any>(null); // 自定义路径线（更粗更明显）
+  const animatedRoutePolylineRef = useRef<any>(null); // 动画路径线（高亮流动效果）
+  const turnArrowMarkersRef = useRef<any[]>([]); // 转向箭头标记
+  const navigationAlertsRef = useRef<any[]>([]); // 导航提示（限速、摄像头等）
   const watchIdRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const lastSpokenRef = useRef<string>('');
@@ -106,6 +233,8 @@ const RideMap: React.FC = () => {
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+  const [currentSpeedLimit, setCurrentSpeedLimit] = useState<number | null>(null);
+  const [upcomingCamera, setUpcomingCamera] = useState<{ distance: number; type: string } | null>(null);
   
   const [activeWaypoint, setActiveWaypoint] = useState<Waypoint | null>(null);
   const [destPosition, setDestPosition] = useState<[number, number] | null>(null);
@@ -158,11 +287,27 @@ const RideMap: React.FC = () => {
     cancelSmoothUpdate();
     smoothFollowRef.current?.stop();
     smoothFollowRef.current = null;
+    
+    // 停止路径动画
+    if (routeAnimationController) {
+      routeAnimationController();
+      routeAnimationController = null;
+    }
+    
     if (routeRef.current) { routeRef.current.clear(); routeRef.current = null; }
     if (customRoutePolylineRef.current) { 
       customRoutePolylineRef.current.setMap(null); 
       customRoutePolylineRef.current = null; 
     }
+    if (animatedRoutePolylineRef.current) {
+      animatedRoutePolylineRef.current.setMap(null);
+      animatedRoutePolylineRef.current = null;
+    }
+    turnArrowMarkersRef.current.forEach(m => m.setMap(null));
+    turnArrowMarkersRef.current = [];
+    navigationAlertsRef.current.forEach(m => m.setMap(null));
+    navigationAlertsRef.current = [];
+    
     if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null; }
     if (waypointMarkerRef.current) { waypointMarkerRef.current.setMap(null); waypointMarkerRef.current = null; }
     gasMarkersRef.current.forEach(m => m.setMap(null));
@@ -170,6 +315,27 @@ const RideMap: React.FC = () => {
     routePathRef.current = [];
     lastVoiceBucketRef.current = Infinity;
     currentStepIndexRef.current = 0;
+
+    // 保存骑行距离到历史记录
+    if (previewInfo && startPosition && lastPositionRef.current[0] !== 0 && lastPositionRef.current[1] !== 0) {
+      const completedDistance = getDistance(startPosition, lastPositionRef.current); // 公里
+      if (completedDistance > 0.1) { // 至少100米才记录
+        const rideHistory = JSON.parse(localStorage.getItem('ride_history') || '[]');
+        rideHistory.push({
+          date: new Date().toISOString(),
+          distance: completedDistance,
+          startPosition,
+          endPosition: lastPositionRef.current,
+          route: previewInfo.distance,
+        });
+        localStorage.setItem('ride_history', JSON.stringify(rideHistory));
+        
+        // 更新总距离
+        const currentTotal = parseFloat(localStorage.getItem('total_riding_distance') || '0');
+        const newTotal = currentTotal + completedDistance;
+        localStorage.setItem('total_riding_distance', newTotal.toFixed(2));
+      }
+    }
 
     setIsNavigating(false);
     setIsAdjusting(false);
@@ -275,32 +441,104 @@ const RideMap: React.FC = () => {
         });
         findGasStationsAlongRoute(allPathPoints);
 
-        // 添加自定义路径线（高德原生导航风格：更粗、更明显）
+        // 添加自定义路径线（高德原生导航风格：更粗、更明显 + 动画效果）
         if (isNavigating && mapRef.current && window.AMap.Polyline) {
-          // 清除旧的路径线
+          // 清除旧的路径线和标记
           if (customRoutePolylineRef.current) {
             customRoutePolylineRef.current.setMap(null);
           }
+          if (animatedRoutePolylineRef.current) {
+            animatedRoutePolylineRef.current.setMap(null);
+          }
+          turnArrowMarkersRef.current.forEach(m => m.setMap(null));
+          turnArrowMarkersRef.current = [];
+          navigationAlertsRef.current.forEach(m => m.setMap(null));
+          navigationAlertsRef.current = [];
           
           // 创建高德原生风格的路径线
           const pathLngLats = allPathPoints.map((p: any) => 
             p.lng != null ? new window.AMap.LngLat(p.lng, p.lat) : new window.AMap.LngLat(p[0], p[1])
           );
           
+          // 主路径线（粗，带白色轮廓）
           customRoutePolylineRef.current = new window.AMap.Polyline({
             path: pathLngLats,
             isOutline: true,
-            outlineColor: '#ffffff', // 白色轮廓
-            borderWeight: 4, // 轮廓宽度
-            strokeColor: '#f97316', // 橙色主路径
+            outlineColor: '#ffffff',
+            borderWeight: 4,
+            strokeColor: '#f97316',
             strokeOpacity: 1,
-            strokeWeight: 12, // 更粗的路径（高德原生约10-15px）
+            strokeWeight: 12,
             strokeStyle: 'solid',
             lineJoin: 'round',
             lineCap: 'round',
-            zIndex: 50, // 确保路径在最上层
+            zIndex: 50,
             map: mapRef.current,
           });
+          
+          // 动画路径线（高亮流动效果，高德原生风格）
+          animatedRoutePolylineRef.current = new window.AMap.Polyline({
+            path: pathLngLats,
+            strokeColor: '#ffd700', // 金色高亮
+            strokeOpacity: 0.8,
+            strokeWeight: 8,
+            strokeStyle: 'solid',
+            lineJoin: 'round',
+            lineCap: 'round',
+            zIndex: 51, // 在主路径之上
+            map: mapRef.current,
+          });
+          
+          // 启动路径动画（高亮流动效果）
+          if (routeAnimationController) {
+            routeAnimationController(); // 停止旧的动画
+          }
+          routeAnimationController = startRouteAnimation(animatedRoutePolylineRef.current);
+          
+          // 添加转向箭头标记（在每个step的转向点）
+          route.steps.forEach((step: any, idx: number) => {
+            if (idx === 0) return; // 跳过第一步（起点）
+            const stepPath = step.path;
+            if (!stepPath || stepPath.length === 0) return;
+            
+            // 转向点在step路径的最后一个点
+            const turnPoint = stepPath[stepPath.length - 1];
+            const turnPos = turnPoint.lng != null 
+              ? [turnPoint.lng, turnPoint.lat] 
+              : [turnPoint[0], turnPoint[1]];
+            
+            // 计算转向角度（根据当前step和下一步的方向）
+            const currentDir = step.instruction || '';
+            const arrowRotation = getTurnArrowRotation(currentDir);
+            
+            // 创建转向箭头标记
+            const arrowMarker = new window.AMap.Marker({
+              position: turnPos,
+              map: mapRef.current,
+              content: `
+                <div class="turn-arrow" style="
+                  width: 32px; 
+                  height: 32px; 
+                  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+                  border-radius: 50%;
+                  border: 3px solid white;
+                  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.5);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  transform: rotate(${arrowRotation}deg);
+                ">
+                  <i class="fa-solid fa-arrow-up" style="color: white; font-size: 14px;"></i>
+                </div>
+              `,
+              offset: new window.AMap.Pixel(-16, -16),
+              zIndex: 60,
+            });
+            turnArrowMarkersRef.current.push(arrowMarker);
+          });
+          
+          // 提取并显示导航提示（限速、摄像头等）
+          extractAndDisplayNavigationAlerts(route.steps, mapRef.current, navigationAlertsRef);
         }
 
         if (isNavigating) {
@@ -490,6 +728,41 @@ const RideMap: React.FC = () => {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current || !currentLocation) return;
+    
+    // 性能优化：预加载地图资源
+    const preloadMapResources = () => {
+      // 预加载常用地图切片（通过创建隐藏的地图实例）
+      if (window.AMap && !(window as any).__amapPreloaded) {
+        try {
+          const preloadContainer = document.createElement('div');
+          preloadContainer.style.display = 'none';
+          preloadContainer.style.width = '1px';
+          preloadContainer.style.height = '1px';
+          document.body.appendChild(preloadContainer);
+          
+          const preloadMap = new window.AMap.Map(preloadContainer, {
+            zoom: 15,
+            center: currentLocation,
+            viewMode: '3D',
+          });
+          
+          // 预加载完成后移除
+          preloadMap.on('complete', () => {
+            setTimeout(() => {
+              preloadMap.destroy();
+              document.body.removeChild(preloadContainer);
+              (window as any).__amapPreloaded = true;
+            }, 1000);
+          });
+        } catch (e) {
+          console.log('Preload skipped:', e);
+        }
+      }
+    };
+    
+    // 延迟预加载，不阻塞主地图初始化
+    setTimeout(preloadMapResources, 100);
+    
     const map = new window.AMap.Map(containerRef.current, {
       zoom: 15,
       center: currentLocation,
@@ -506,6 +779,10 @@ const RideMap: React.FC = () => {
       showLabel: true, // 显示标签
       defaultCursor: 'default',
       isHotspot: false,
+      // 性能优化配置
+      lazyLoad: false, // 禁用懒加载，确保地图完整加载
+      resizeEnable: true, // 允许自动调整大小
+      animateEnable: true, // 启用动画
       // 注意：mapStyle在初始化时使用dark，导航模式会切换
     });
     
@@ -520,6 +797,7 @@ const RideMap: React.FC = () => {
       trafficLayer.setMap(map);
     }
     
+    // 性能优化：使用事件委托，减少监听器
     map.on('complete', () => {
       setMapLoaded(true);
       startTracking();
@@ -533,6 +811,7 @@ const RideMap: React.FC = () => {
         if (data.isNavigating) setIsAdjusting(true);
       }
     });
+    
     mapRef.current = map;
   }, [currentLocation]);
 
@@ -700,6 +979,56 @@ const RideMap: React.FC = () => {
     }
   }, [isNavigating, voiceEnabled, previewInfo?.steps, riders[0].position]);
 
+  // 实时检测导航提示：限速、摄像头（高德原生导航风格）
+  useEffect(() => {
+    if (!isNavigating || !previewInfo?.steps?.length) {
+      setCurrentSpeedLimit(null);
+      setUpcomingCamera(null);
+      return;
+    }
+    
+    const steps = previewInfo.steps;
+    const currentPos = lastPositionRef.current;
+    let foundSpeedLimit: number | null = null;
+    let foundCamera: { distance: number; type: string } | null = null;
+    
+    // 检查当前步骤和未来3个步骤中的限速和摄像头
+    for (let i = currentStepIndexRef.current; i < Math.min(currentStepIndexRef.current + 3, steps.length); i++) {
+      const step = steps[i];
+      const instruction = step.instruction || '';
+      const stepPath = step.path;
+      if (!stepPath || stepPath.length === 0) continue;
+      
+      // 检查限速
+      const speedLimitMatch = instruction.match(/(\d+)\s*km\/h|限速\s*(\d+)/i);
+      if (speedLimitMatch && !foundSpeedLimit) {
+        const speedLimit = parseInt(speedLimitMatch[1] || speedLimitMatch[2], 10);
+        const stepStart = stepPath[0];
+        const stepStartPos = toTuple(stepStart);
+        const distToLimit = distanceMeters(currentPos, stepStartPos);
+        if (distToLimit < 500) { // 500米内显示限速
+          foundSpeedLimit = speedLimit;
+        }
+      }
+      
+      // 检查摄像头
+      if (instruction.match(/摄像头|电子眼|监控|测速/i) && !foundCamera) {
+        const stepStart = stepPath[0];
+        const stepStartPos = toTuple(stepStart);
+        const distToCamera = distanceMeters(currentPos, stepStartPos);
+        if (distToCamera < 300) { // 300米内显示摄像头提示
+          foundCamera = {
+            distance: Math.round(distToCamera),
+            type: instruction.includes('测速') ? 'speed' : 'camera',
+          };
+        }
+      }
+    }
+    
+    setCurrentSpeedLimit(foundSpeedLimit);
+    setUpcomingCamera(foundCamera);
+  }, [isNavigating, previewInfo?.steps, riders[0].position]);
+
   const progress = useMemo(() => {
     if (!isNavigating || !destPosition || !startPosition) return 0;
     const total = getDistance(startPosition, destPosition);
@@ -721,23 +1050,51 @@ const RideMap: React.FC = () => {
       {/* 顶部导航 HUD */}
       {isNavigating && (
         <div className="absolute top-[env(safe-area-inset-top)] inset-x-0 z-[60] px-4 pt-4">
-          <div className="bg-slate-900/95 backdrop-blur-xl border-b-2 border-orange-500 rounded-2xl p-4 shadow-2xl flex items-center gap-4 animate-slide-up">
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white text-3xl shrink-0 ${isSpeaking ? 'bg-orange-600 animate-pulse' : 'bg-slate-800'}`}>
-               <i className={`fa-solid ${getManeuverIcon(translatedInstruction || previewInfo?.steps[0]?.instruction || '')}`}></i>
-            </div>
-            <div className="flex-1 min-w-0">
-               <div className="text-orange-500 text-[9px] font-black uppercase tracking-widest">Next Maneuver</div>
-               <div className="text-white font-bold text-base truncate uppercase">{translatedInstruction || "Calculating..."}</div>
-               <div className="text-slate-400 text-[10px] font-bold mt-1 uppercase">{previewInfo?.steps[0]?.distance || 0}m Ahead</div>
-            </div>
-            {/* 红绿灯倒计时（如果可用） */}
-            {trafficLightCountdown !== null && trafficLightCountdown > 0 && (
-              <div className="flex flex-col items-center justify-center bg-red-600/90 rounded-xl px-3 py-2 min-w-[50px] border-2 border-red-400">
-                <i className="fa-solid fa-traffic-light text-white text-xs mb-1"></i>
-                <div className="text-white font-black text-lg leading-none">{trafficLightCountdown}</div>
-                <div className="text-white/80 text-[8px] font-bold uppercase mt-0.5">SEC</div>
+          <div className="bg-slate-900/95 backdrop-blur-xl border-b-2 border-orange-500 rounded-2xl p-4 shadow-2xl animate-slide-up">
+            {/* 主信息行 */}
+            <div className="flex items-center gap-4 mb-3">
+              <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white text-3xl shrink-0 ${isSpeaking ? 'bg-orange-600 animate-pulse' : 'bg-slate-800'}`}>
+                 <i className={`fa-solid ${getManeuverIcon(translatedInstruction || previewInfo?.steps[0]?.instruction || '')}`}></i>
               </div>
-            )}
+              <div className="flex-1 min-w-0">
+                 <div className="text-orange-500 text-[9px] font-black uppercase tracking-widest">Next Maneuver</div>
+                 <div className="text-white font-bold text-base truncate uppercase">{translatedInstruction || "Calculating..."}</div>
+                 <div className="text-slate-400 text-[10px] font-bold mt-1 uppercase">{previewInfo?.steps[0]?.distance || 0}m Ahead</div>
+              </div>
+              {/* 导航提示组 */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* 限速提示 */}
+                {currentSpeedLimit !== null && (
+                  <div className="flex flex-col items-center justify-center bg-blue-600/90 rounded-xl px-3 py-2 min-w-[45px] border-2 border-blue-400">
+                    <i className="fa-solid fa-gauge-high text-white text-xs mb-0.5"></i>
+                    <div className="text-white font-black text-sm leading-none">{currentSpeedLimit}</div>
+                    <div className="text-white/80 text-[7px] font-bold uppercase mt-0.5">KM/H</div>
+                  </div>
+                )}
+                {/* 摄像头提示 */}
+                {upcomingCamera && (
+                  <div className={`flex flex-col items-center justify-center rounded-xl px-3 py-2 min-w-[45px] border-2 ${
+                    upcomingCamera.type === 'speed' 
+                      ? 'bg-red-600/90 border-red-400' 
+                      : 'bg-yellow-600/90 border-yellow-400'
+                  }`}>
+                    <i className="fa-solid fa-camera text-white text-xs mb-0.5"></i>
+                    <div className="text-white font-black text-xs leading-none">{upcomingCamera.distance}m</div>
+                    <div className="text-white/80 text-[7px] font-bold uppercase mt-0.5">
+                      {upcomingCamera.type === 'speed' ? 'SPEED' : 'CAM'}
+                    </div>
+                  </div>
+                )}
+                {/* 红绿灯倒计时（如果可用） */}
+                {trafficLightCountdown !== null && trafficLightCountdown > 0 && (
+                  <div className="flex flex-col items-center justify-center bg-red-600/90 rounded-xl px-3 py-2 min-w-[50px] border-2 border-red-400">
+                    <i className="fa-solid fa-traffic-light text-white text-xs mb-1"></i>
+                    <div className="text-white font-black text-lg leading-none">{trafficLightCountdown}</div>
+                    <div className="text-white/80 text-[8px] font-bold uppercase mt-0.5">SEC</div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
