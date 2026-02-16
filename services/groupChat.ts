@@ -15,6 +15,9 @@ export interface GroupMessage {
   message: string;
   timestamp: string;
   isHighlighted?: boolean; // 管理员/领队的消息会高亮
+  /** 图片或视频 URL（data URL 或后端返回的 URL） */
+  imageUrl?: string;
+  videoUrl?: string;
 }
 
 /**
@@ -32,9 +35,12 @@ const getAuthHeaders = () => {
 };
 
 /**
- * 发送群消息（仅管理员和领队）
+ * 发送群消息（仅管理员和领队），可选带图片/视频（base64）
  */
-export const sendGroupMessage = async (message: string): Promise<GroupMessage> => {
+export const sendGroupMessage = async (
+  message: string,
+  options?: { imageBase64?: string; videoBase64?: string }
+): Promise<GroupMessage> => {
   const role = await getUserRole();
   if (role !== 'admin' && role !== 'leader') {
     throw new Error('Only admins and leaders can send group messages');
@@ -43,12 +49,14 @@ export const sendGroupMessage = async (message: string): Promise<GroupMessage> =
   const user = await getCurrentUser();
   if (!user) throw new Error('Not authenticated');
 
+  const body: Record<string, string> = { message: message.trim() };
+  if (options?.imageBase64) body.image_base64 = options.imageBase64;
+  if (options?.videoBase64) body.video_base64 = options.videoBase64;
+
   const response = await fetch(`${WP_BASE_URL}/rideinchina/group-messages`, {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({
-      message,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

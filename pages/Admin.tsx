@@ -8,6 +8,8 @@ import type { UserDocumentView, UserInfo } from '../services/admin';
 import type { GroupDestination } from '../services/groupDestination';
 import type { GroupMessage } from '../services/groupChat';
 
+type DocPreview = { userName: string; docType: string; fileUrl: string } | null;
+
 const Admin: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
   const [permissions, setPermissions] = useState<any>(null);
@@ -18,6 +20,9 @@ const Admin: React.FC = () => {
   const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [messageInput, setMessageInput] = useState('');
+  const [docPreview, setDocPreview] = useState<DocPreview>(null);
+  const [sendingMedia, setSendingMedia] = useState(false);
+  const messageMediaInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -83,16 +88,40 @@ const Admin: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!messageInput.trim()) return;
-    
+  const handleSendMessage = async (opts?: { imageBase64?: string; videoBase64?: string }) => {
+    const text = messageInput.trim();
+    if (!text && !opts?.imageBase64 && !opts?.videoBase64) return;
+    const caption = text || (opts?.videoBase64 ? 'Video' : opts?.imageBase64 ? 'Image' : '');
+    setSendingMedia(!!(opts?.imageBase64 || opts?.videoBase64));
     try {
-      const message = await sendGroupMessage(messageInput);
+      const message = await sendGroupMessage(caption, opts);
       setGroupMessages(prev => [message, ...prev]);
       setMessageInput('');
     } catch (error: any) {
       alert(error.message || 'Failed to send message');
+    } finally {
+      setSendingMedia(false);
     }
+  };
+
+  const onMessageMediaSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isImage && !isVideo) {
+      alert('Please select an image or video.');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = (reader.result as string) || '';
+      if (isImage) handleSendMessage({ imageBase64: base64 });
+      else handleSendMessage({ videoBase64: base64 });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleUpdateDocumentStatus = async (userId: number, docId: string, status: 'Verified' | 'Rejected') => {
@@ -206,41 +235,86 @@ const Admin: React.FC = () => {
       <div className="flex-1 overflow-y-auto p-4">
         {activeTab === 'documents' && permissions.role === 'admin' && (
           <div className="space-y-4">
-            {userDocuments.map((userDoc) => (
-              <div key={userDoc.userId} className="bg-white rounded-2xl p-4 border border-slate-200">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="font-bold text-slate-900">{userDoc.userName}</h3>
-                    <p className="text-xs text-slate-500">{userDoc.userEmail}</p>
+            {userDocuments.length === 0 ? (
+              <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-500">
+                <i className="fa-solid fa-folder-open text-4xl mb-3 text-slate-300"></i>
+                <p className="font-medium">暂无用户上传证件</p>
+                <p className="text-sm mt-1">用户在 App 的 Me 页上传后，会在此显示</p>
+              </div>
+            ) : (
+              userDocuments.map((userDoc) => (
+                <div key={userDoc.userId} className="bg-white rounded-2xl p-4 border border-slate-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="font-bold text-slate-900">{userDoc.userName}</h3>
+                      <p className="text-xs text-slate-500">{userDoc.userEmail}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {userDoc.documents.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-800">{doc.type}</p>
+                          <p className="text-xs text-slate-500 truncate">{doc.fileName}</p>
+                          <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            doc.status === 'Verified' ? 'bg-green-100 text-green-700' :
+                            doc.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {doc.status}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {doc.fileUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setDocPreview({ userName: userDoc.userName, docType: doc.type, fileUrl: doc.fileUrl! })}
+                              className="px-3 py-1.5 bg-slate-600 text-white text-xs rounded-lg"
+                            >
+                              View
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleUpdateDocumentStatus(userDoc.userId, doc.id, 'Verified')}
+                            className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleUpdateDocumentStatus(userDoc.userId, doc.id, 'Rejected')}
+                            className="px-3 py-1.5 bg-red-600 text-white text-xs rounded-lg"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                
-                <div className="space-y-2">
-                  {userDoc.documents.map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="text-sm font-bold">{doc.type}</p>
-                        <p className="text-xs text-slate-500">{doc.fileName}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleUpdateDocumentStatus(userDoc.userId, doc.id, 'Verified')}
-                          className="px-3 py-1 bg-green-600 text-white text-xs rounded-lg"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleUpdateDocumentStatus(userDoc.userId, doc.id, 'Rejected')}
-                          className="px-3 py-1 bg-red-600 text-white text-xs rounded-lg"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+              ))
+            )}
+            {/* 证件图片预览弹窗 */}
+            {docPreview && (
+              <div
+                className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
+                onClick={() => setDocPreview(null)}
+              >
+                <div className="bg-white rounded-2xl overflow-hidden max-w-lg w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                  <div className="p-3 border-b border-slate-200 flex items-center justify-between">
+                    <span className="font-bold text-slate-800">{docPreview.userName} · {docPreview.docType}</span>
+                    <button type="button" onClick={() => setDocPreview(null)} className="text-slate-500 hover:text-slate-800 p-1">
+                      <i className="fa-solid fa-times"></i>
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-100 min-h-[200px]">
+                    {docPreview.fileUrl.startsWith('data:') || docPreview.fileUrl.startsWith('http') ? (
+                      <img src={docPreview.fileUrl} alt={docPreview.docType} className="max-w-full max-h-[70vh] object-contain rounded-lg" />
+                    ) : (
+                      <p className="text-slate-500 text-sm">无法预览该文件</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
 
@@ -311,24 +385,59 @@ const Admin: React.FC = () => {
         {activeTab === 'messages' && (
           <div className="flex flex-col h-full">
             <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-              {groupMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`p-3 rounded-xl ${
-                    msg.isHighlighted || msg.userRole === 'admin' || msg.userRole === 'leader'
-                      ? 'bg-orange-100 border-2 border-orange-300'
-                      : 'bg-white border border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-sm">{msg.userName}</span>
-                    <span className="text-xs text-slate-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+              {groupMessages.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-sm">No group messages yet. Send one below.</div>
+              ) : (
+                groupMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`p-3 rounded-xl ${
+                      msg.isHighlighted || msg.userRole === 'admin' || msg.userRole === 'leader'
+                        ? 'bg-orange-100 border-2 border-orange-300'
+                        : 'bg-white border border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-sm">{msg.userName}</span>
+                      <span className="text-xs text-slate-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                      {(msg.userRole === 'admin' || msg.userRole === 'leader') && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 font-bold">
+                          {msg.userRole}
+                        </span>
+                      )}
+                    </div>
+                    {msg.message && <p className="text-sm">{msg.message}</p>}
+                    {msg.imageUrl && (
+                      <div className="mt-2">
+                        <img src={msg.imageUrl} alt="" className="max-w-full max-h-48 rounded-lg object-cover" />
+                      </div>
+                    )}
+                    {msg.videoUrl && (
+                      <div className="mt-2">
+                        <video src={msg.videoUrl} controls className="max-w-full max-h-48 rounded-lg" />
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm">{msg.message}</p>
-                </div>
-              ))}
+                ))
+              )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              <input
+                type="file"
+                ref={messageMediaInputRef}
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={onMessageMediaSelected}
+              />
+              <button
+                type="button"
+                onClick={() => messageMediaInputRef.current?.click()}
+                disabled={sendingMedia}
+                className="p-2.5 bg-slate-100 rounded-xl text-slate-600 disabled:opacity-50"
+                title="Send image or video"
+              >
+                {sendingMedia ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-image"></i>}
+              </button>
               <input
                 type="text"
                 value={messageInput}
@@ -338,8 +447,9 @@ const Admin: React.FC = () => {
                 className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-xl"
               />
               <button
-                onClick={handleSendMessage}
-                className="bg-orange-600 text-white px-6 py-2 rounded-xl font-bold"
+                onClick={() => handleSendMessage()}
+                disabled={sendingMedia}
+                className="bg-orange-600 text-white px-6 py-2 rounded-xl font-bold disabled:opacity-70"
               >
                 Send
               </button>

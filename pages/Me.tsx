@@ -23,7 +23,7 @@ interface TibetPermit {
 }
 
 const Me: React.FC = () => {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [permits, setPermits] = useState<TibetPermit[]>([]);
   const [totalDistance, setTotalDistance] = useState<number>(0);
@@ -189,45 +189,79 @@ const Me: React.FC = () => {
     }
   };
 
+  // 用户头像：WordPress 返回的 avatar_urls，否则显示首字母
+  const avatarUrl = user?.avatar_urls?.[96] || user?.avatar_urls?.[48] || undefined;
+  const displayName = user?.name || user?.username || 'Rider';
+  const initials = displayName ? (displayName.slice(0, 2).toUpperCase()) : '?';
+
+  if (authLoading) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-slate-50 p-8">
+        <i className="fa-solid fa-spinner fa-spin text-4xl text-orange-500 mb-4"></i>
+        <p className="text-slate-500 text-sm">Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col bg-slate-50">
-      {/* 用户信息卡片 */}
+      {/* 用户信息卡片：登录前后完全不同展示 */}
       <div className="bg-gradient-to-br from-orange-600 to-orange-500 p-6 pt-8">
         <div className="flex items-center gap-4 mb-4">
-          <div className="w-16 h-16 bg-white/20 backdrop-blur rounded-full flex items-center justify-center text-white text-2xl border-4 border-white/30">
-            <i className="fa-solid fa-user"></i>
-          </div>
-          <div className="flex-1">
-            <h2 className="text-white font-bold text-xl">My Profile</h2>
-            <p className="text-white/90 text-sm">Manage your documents & permits</p>
-            {!isAuthenticated && (
-              <button 
-                onClick={() => setShowLoginModal(true)} 
-                className="mt-2 bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/30 transition-colors"
-              >
-                Login to Sync Data
-              </button>
-            )}
-            {isAuthenticated && user && (
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-white/90 text-sm">{user.name}</span>
-                <button onClick={logout} className="text-white/80 text-xs underline hover:text-white transition-colors">
-                  Logout
-                </button>
+          {/* 头像：已登录显示真实头像，未登录显示占位 */}
+          <div className="w-20 h-20 rounded-full border-4 border-white/40 overflow-hidden bg-white/20 flex-shrink-0 shadow-xl">
+            {isAuthenticated && avatarUrl ? (
+              <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
+            ) : isAuthenticated ? (
+              <div className="w-full h-full flex items-center justify-center text-white text-2xl font-bold">
+                {initials}
+              </div>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-white text-3xl">
+                <i className="fa-solid fa-user"></i>
               </div>
             )}
           </div>
+          <div className="flex-1 min-w-0">
+            {isAuthenticated && user ? (
+              <>
+                <h2 className="text-white font-bold text-xl truncate">{displayName}</h2>
+                <p className="text-white/90 text-sm truncate mt-0.5">{user.email}</p>
+                <p className="text-white/70 text-xs mt-1">Ride In China · Data synced</p>
+                <button
+                  onClick={logout}
+                  className="mt-3 text-white/90 text-xs font-medium underline hover:text-white"
+                >
+                  Log out
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-white font-bold text-xl">Guest</h2>
+                <p className="text-white/90 text-sm mt-0.5">Sign in to sync documents & ride data</p>
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="mt-3 bg-white text-orange-600 px-4 py-2 rounded-xl text-sm font-bold shadow-lg active:scale-95"
+                >
+                  Log in / Register
+                </button>
+              </>
+            )}
+          </div>
         </div>
-        
-        {/* 骑行统计 */}
+
+        {/* 骑行统计：未登录也显示，但提示登录后可同步 */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-4 border border-white/20">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-white/80 text-xs font-bold uppercase mb-1">Total Distance</p>
               <p className="text-white text-3xl font-black">{totalDistance.toFixed(1)}</p>
               <p className="text-white/80 text-xs mt-1">Kilometers in China</p>
+              {!isAuthenticated && (
+                <p className="text-white/60 text-[10px] mt-1">Login to sync across devices</p>
+              )}
             </div>
-            <div className="w-16 h-16 bg-white/20 backdrop-blur rounded-full flex items-center justify-center">
+            <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center">
               <i className="fa-solid fa-route text-white text-2xl"></i>
             </div>
           </div>

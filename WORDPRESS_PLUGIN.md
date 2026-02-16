@@ -232,10 +232,12 @@ function rideinchina_get_group_messages(WP_REST_Request $request) {
 
 function rideinchina_send_group_message(WP_REST_Request $request) {
     $user = wp_get_current_user();
-    $message = sanitize_text_field($request['message']);
+    $message = sanitize_text_field($request['message'] ?? '');
+    $image_base64 = $request->get_param('image_base64');
+    $video_base64 = $request->get_param('video_base64');
 
-    if (!$message) {
-        return new WP_Error('invalid_data', 'Message is required', array('status' => 400));
+    if (!$message && !$image_base64 && !$video_base64) {
+        return new WP_Error('invalid_data', 'Message or media is required', array('status' => 400));
     }
 
     $user_role = get_user_meta($user->ID, 'rideinchina_role', true);
@@ -251,10 +253,16 @@ function rideinchina_send_group_message(WP_REST_Request $request) {
         'userId' => $user->ID,
         'userName' => $user->display_name,
         'userRole' => $user_role,
-        'message' => $message,
+        'message' => $message ?: '',
         'timestamp' => current_time('mysql'),
         'isHighlighted' => $user_role === 'admin' || $user_role === 'leader',
     );
+    if (is_string($image_base64) && $image_base64 !== '') {
+        $new_message['imageUrl'] = $image_base64;
+    }
+    if (is_string($video_base64) && $video_base64 !== '') {
+        $new_message['videoUrl'] = $video_base64;
+    }
 
     $messages = get_option('rideinchina_group_messages', array());
     $messages[] = $new_message;

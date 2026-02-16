@@ -1133,8 +1133,15 @@ const RideMap: React.FC = () => {
                 <i className="fa-solid fa-bullhorn text-white text-xl"></i>
               </div>
               <div className="flex-1">
-                <div className="text-white/90 text-xs font-bold uppercase mb-1">Group Message</div>
-                <div className="text-white font-bold text-sm">{groupMessages[0].message}</div>
+                <div className="text-white/90 text-xs font-bold uppercase mb-1">
+                  Group Message
+                  {(groupMessages[0].userRole === 'admin' || groupMessages[0].userRole === 'leader') && (
+                    <span className="ml-2 px-1.5 py-0.5 rounded bg-white/20 text-[10px]">{groupMessages[0].userRole}</span>
+                  )}
+                </div>
+                <div className="text-white font-bold text-sm">
+                  {groupMessages[0].message || (groupMessages[0].imageUrl ? '📷 Image' : groupMessages[0].videoUrl ? '🎬 Video' : '')}
+                </div>
                 <div className="text-white/70 text-[10px] mt-1">
                   {groupMessages[0].userName} • {new Date(groupMessages[0].timestamp).toLocaleTimeString()}
                 </div>
@@ -1159,7 +1166,13 @@ const RideMap: React.FC = () => {
                     <span className="text-white font-bold text-xs">{msg.userName}</span>
                     <span className="text-slate-400 text-[10px]">{new Date(msg.timestamp).toLocaleTimeString()}</span>
                   </div>
-                  <p className="text-white text-sm">{msg.message}</p>
+                  {msg.message && <p className="text-white text-sm">{msg.message}</p>}
+                  {msg.imageUrl && (
+                    <img src={msg.imageUrl} alt="" className="mt-2 max-w-full max-h-32 rounded-lg object-cover" />
+                  )}
+                  {msg.videoUrl && (
+                    <video src={msg.videoUrl} controls className="mt-2 max-w-full max-h-32 rounded-lg" />
+                  )}
                 </div>
               ))}
             </div>
