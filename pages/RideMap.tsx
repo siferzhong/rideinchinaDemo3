@@ -347,7 +347,7 @@ const RideMap: React.FC = () => {
     }
   }, [isNavigating]);
 
-  const stopNavigation = useCallback(() => {
+  const stopNavigation = useCallback(async () => {
     releaseWakeLock();
     cancelSmoothUpdate();
     smoothFollowRef.current?.stop();
