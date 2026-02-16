@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { saveUserDocuments, getUserDocuments, saveTibetPermits, getTibetPermits, saveTotalDistance, getTotalDistance } from '../services/userData';
+import LoginModal from '../components/LoginModal';
 
 interface Document {
   id: string;
@@ -20,31 +23,28 @@ interface TibetPermit {
 }
 
 const Me: React.FC = () => {
+  const { user, isAuthenticated, logout } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [permits, setPermits] = useState<TibetPermit[]>([]);
   const [totalDistance, setTotalDistance] = useState<number>(0);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedDocType, setSelectedDocType] = useState<string | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
-  // 从localStorage加载数据
+  // 从 WordPress 或 localStorage 加载数据
   useEffect(() => {
-    const savedDocs = localStorage.getItem('user_documents');
-    const savedPermits = localStorage.getItem('tibet_permits');
-    const savedDistance = localStorage.getItem('total_riding_distance');
-    
-    if (savedDocs) {
-      setDocuments(JSON.parse(savedDocs));
-    }
-    if (savedPermits) {
-      setPermits(JSON.parse(savedPermits));
-    }
-    if (savedDistance) {
-      setTotalDistance(parseFloat(savedDistance));
-    } else {
-      // 默认值：从导航历史计算（如果有）
-      calculateTotalDistance();
-    }
+    const loadData = async () => {
+      const [docs, permitsData, distance] = await Promise.all([
+        getUserDocuments(),
+        getTibetPermits(),
+        getTotalDistance(),
+      ]);
+      setDocuments(docs);
+      setPermits(permitsData);
+      setTotalDistance(distance);
+    };
+    loadData();
   }, []);
 
   // 计算总骑行距离（从导航历史）
@@ -95,7 +95,7 @@ const Me: React.FC = () => {
     try {
       // 将文件转换为base64（实际应用中应该上传到服务器）
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const base64Data = reader.result as string;
         
         const newDoc: Document = {
@@ -109,7 +109,8 @@ const Me: React.FC = () => {
 
         const updatedDocs = [...documents.filter(d => d.type !== newDoc.type), newDoc];
         setDocuments(updatedDocs);
-        localStorage.setItem('user_documents', JSON.stringify(updatedDocs));
+        // 同步到 WordPress
+        await saveUserDocuments(updatedDocs);
         setUploadingDoc(null);
         setSelectedDocType(null);
         
@@ -199,6 +200,22 @@ const Me: React.FC = () => {
           <div className="flex-1">
             <h2 className="text-white font-bold text-xl">My Profile</h2>
             <p className="text-white/90 text-sm">Manage your documents & permits</p>
+            {!isAuthenticated && (
+              <button 
+                onClick={() => setShowLoginModal(true)} 
+                className="mt-2 bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/30 transition-colors"
+              >
+                Login to Sync Data
+              </button>
+            )}
+            {isAuthenticated && user && (
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-white/90 text-sm">{user.name}</span>
+                <button onClick={logout} className="text-white/80 text-xs underline hover:text-white transition-colors">
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </div>
         
@@ -393,6 +410,9 @@ const Me: React.FC = () => {
         accept="image/*,.pdf"
         className="hidden"
       />
+
+      {/* 登录弹窗 */}
+      <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </div>
   );
 };

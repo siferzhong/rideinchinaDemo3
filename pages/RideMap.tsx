@@ -334,6 +334,15 @@ const RideMap: React.FC = () => {
         const currentTotal = parseFloat(localStorage.getItem('total_riding_distance') || '0');
         const newTotal = currentTotal + completedDistance;
         localStorage.setItem('total_riding_distance', newTotal.toFixed(2));
+        
+        // 同步到 WordPress
+        try {
+          const { saveTotalDistance, saveRideHistory } = await import('../services/userData');
+          await saveTotalDistance(newTotal);
+          await saveRideHistory(rideHistory);
+        } catch (error) {
+          console.error('Failed to sync ride data:', error);
+        }
       }
     }
 
