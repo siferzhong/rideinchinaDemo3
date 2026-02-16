@@ -3,6 +3,11 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { pointToPathDistance, distanceMeters, toTuple, type LngLatLike } from '../utils/geo';
 import { requestWakeLock, releaseWakeLock } from '../utils/wakeLock';
 import { createSmoothFollow, cancelSmoothUpdate } from '../utils/smoothMap';
+import { getGroupDestination } from '../services/groupDestination';
+import { getGroupMessages, getLatestMessages } from '../services/groupChat';
+import { getUserPermissions } from '../services/permissions';
+import type { GroupDestination } from '../services/groupDestination';
+import type { GroupMessage } from '../services/groupChat';
 
 declare global {
   interface Window {
@@ -239,6 +244,12 @@ const RideMap: React.FC = () => {
   const [activeWaypoint, setActiveWaypoint] = useState<Waypoint | null>(null);
   const [destPosition, setDestPosition] = useState<[number, number] | null>(null);
   const [startPosition, setStartPosition] = useState<[number, number] | null>(null);
+  
+  // 群功能相关状态
+  const [groupDestination, setGroupDestination] = useState<GroupDestination | null>(null);
+  const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
+  const [permissions, setPermissions] = useState<any>(null);
+  const [showGroupMessages, setShowGroupMessages] = useState(false);
 
   useEffect(() => {
     destPositionRef.current = destPosition;
@@ -253,6 +264,60 @@ const RideMap: React.FC = () => {
     { id: 'rider2', name: 'Hans', role: 'member', speed: 45, altitude: 500, position: [0, 0] },
   ]);
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
+
+  // 加载群目的地和权限
+  useEffect(() => {
+    const loadGroupData = async () => {
+      try {
+        const [dest, perms] = await Promise.all([
+          getGroupDestination(),
+          getUserPermissions(),
+        ]);
+        setGroupDestination(dest);
+        setPermissions(perms);
+        
+        // 如果有群目的地，自动设置为目的地
+        if (dest && dest.isActive && !destPosition) {
+          setDestPosition(dest.position);
+        }
+      } catch (error) {
+        console.error('Failed to load group data:', error);
+      }
+    };
+    loadGroupData();
+    
+    // 每30秒刷新群目的地
+    const interval = setInterval(loadGroupData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 加载和轮询群消息
+  useEffect(() => {
+    const loadMessages = async () => {
+      try {
+        const messages = await getGroupMessages(10);
+        setGroupMessages(messages);
+      } catch (error) {
+        console.error('Failed to load messages:', error);
+      }
+    };
+    
+    loadMessages();
+    // 每10秒轮询新消息
+    const interval = setInterval(async () => {
+      if (groupMessages.length > 0) {
+        const latest = groupMessages[0];
+        const newMessages = await getLatestMessages(latest.timestamp);
+        if (newMessages.length > 0) {
+          setGroupMessages(prev => [...newMessages, ...prev]);
+        }
+      } else {
+        await loadMessages();
+      }
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // 处理手机罗盘方向（供平滑旋转与 watchPosition 使用）
   useEffect(() => {
@@ -1056,9 +1121,55 @@ const RideMap: React.FC = () => {
     <div className="h-full relative bg-slate-950 flex flex-col overflow-hidden">
       <div ref={containerRef} className="absolute inset-0 z-0" />
 
+      {/* 群消息提示（高亮显示） */}
+      {groupMessages.length > 0 && groupMessages[0].isHighlighted && (
+        <div className="absolute top-[env(safe-area-inset-top)] left-4 right-4 z-[65] mt-4">
+          <div 
+            onClick={() => setShowGroupMessages(!showGroupMessages)}
+            className="bg-orange-600/95 backdrop-blur-xl border-2 border-orange-400 rounded-2xl p-4 shadow-2xl animate-pulse cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                <i className="fa-solid fa-bullhorn text-white text-xl"></i>
+              </div>
+              <div className="flex-1">
+                <div className="text-white/90 text-xs font-bold uppercase mb-1">Group Message</div>
+                <div className="text-white font-bold text-sm">{groupMessages[0].message}</div>
+                <div className="text-white/70 text-[10px] mt-1">
+                  {groupMessages[0].userName} • {new Date(groupMessages[0].timestamp).toLocaleTimeString()}
+                </div>
+              </div>
+              <i className={`fa-solid fa-chevron-${showGroupMessages ? 'up' : 'down'} text-white`}></i>
+            </div>
+          </div>
+          
+          {/* 消息列表 */}
+          {showGroupMessages && (
+            <div className="mt-2 bg-slate-900/95 backdrop-blur-xl rounded-2xl p-4 max-h-64 overflow-y-auto space-y-2">
+              {groupMessages.slice(0, 5).map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`p-3 rounded-xl ${
+                    msg.isHighlighted || msg.userRole === 'admin' || msg.userRole === 'leader'
+                      ? 'bg-orange-600/30 border border-orange-400'
+                      : 'bg-slate-800/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-white font-bold text-xs">{msg.userName}</span>
+                    <span className="text-slate-400 text-[10px]">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                  <p className="text-white text-sm">{msg.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 顶部导航 HUD */}
       {isNavigating && (
-        <div className="absolute top-[env(safe-area-inset-top)] inset-x-0 z-[60] px-4 pt-4">
+        <div className={`absolute ${groupMessages.length > 0 && groupMessages[0].isHighlighted ? 'top-32' : 'top-[env(safe-area-inset-top)]'} inset-x-0 z-[60] px-4 pt-4`}>
           <div className="bg-slate-900/95 backdrop-blur-xl border-b-2 border-orange-500 rounded-2xl p-4 shadow-2xl animate-slide-up">
             {/* 主信息行 */}
             <div className="flex items-center gap-4 mb-3">
@@ -1241,10 +1352,41 @@ const RideMap: React.FC = () => {
       </div>
 
       {!isNavigating && !isAdjusting && (
-        <div className="absolute bottom-12 left-4 right-4 z-10">
-           <button onClick={() => setIsSearching(true)} className="w-full bg-orange-600 text-white py-5 rounded-2xl font-black shadow-3xl flex items-center justify-center gap-3 active:scale-95 transition-all text-xl uppercase italic">
-             <i className="fa-solid fa-map-location-dot"></i> Start Ride
-           </button>
+        <div className="absolute bottom-12 left-4 right-4 z-10 space-y-3">
+          {/* 群目的地按钮 */}
+          {groupDestination && groupDestination.isActive ? (
+            <button 
+              onClick={() => {
+                setDestPosition(groupDestination.position);
+                setIsAdjusting(true);
+                updateRoutePreview(groupDestination.position);
+              }} 
+              className="w-full bg-green-600 text-white py-5 rounded-2xl font-black shadow-3xl flex items-center justify-center gap-3 active:scale-95 transition-all text-xl uppercase italic"
+            >
+              <i className="fa-solid fa-users"></i> Start Group Ride: {groupDestination.name}
+            </button>
+          ) : permissions?.canSetGroupDestination ? (
+            <button 
+              onClick={() => setIsSearching(true)} 
+              className="w-full bg-orange-600 text-white py-5 rounded-2xl font-black shadow-3xl flex items-center justify-center gap-3 active:scale-95 transition-all text-xl uppercase italic"
+            >
+              <i className="fa-solid fa-map-location-dot"></i> Set Group Destination
+            </button>
+          ) : (
+            <div className="w-full bg-slate-800/90 text-slate-300 py-5 rounded-2xl font-bold shadow-3xl flex items-center justify-center gap-3 text-lg uppercase italic border-2 border-slate-600">
+              <i className="fa-solid fa-clock"></i> Waiting for Leader to Set Destination
+            </div>
+          )}
+          
+          {/* 普通导航按钮（如果有权限） */}
+          {permissions?.canSetGroupDestination && (
+            <button 
+              onClick={() => setIsSearching(true)} 
+              className="w-full bg-slate-700 text-white py-4 rounded-2xl font-bold shadow-2xl flex items-center justify-center gap-3 active:scale-95 transition-all text-sm uppercase"
+            >
+              <i className="fa-solid fa-map-location-dot"></i> Start Personal Ride
+            </button>
+          )}
         </div>
       )}
 

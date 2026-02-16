@@ -43,5 +43,6 @@ export enum AppTab {
   MAP = 'map',
   DOCS = 'docs',
   AI = 'ai',
-  GALLERY = 'gallery'
+  GALLERY = 'gallery',
+  ADMIN = 'admin'
 }
