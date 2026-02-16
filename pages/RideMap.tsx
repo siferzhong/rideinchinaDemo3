@@ -71,6 +71,7 @@ const RideMap: React.FC = () => {
   const destMarkerRef = useRef<any>(null);
   const waypointMarkerRef = useRef<any>(null);
   const routeRef = useRef<any>(null);
+  const customRoutePolylineRef = useRef<any>(null); // 自定义路径线（更粗更明显）
   const watchIdRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const lastSpokenRef = useRef<string>('');
@@ -158,6 +159,10 @@ const RideMap: React.FC = () => {
     smoothFollowRef.current?.stop();
     smoothFollowRef.current = null;
     if (routeRef.current) { routeRef.current.clear(); routeRef.current = null; }
+    if (customRoutePolylineRef.current) { 
+      customRoutePolylineRef.current.setMap(null); 
+      customRoutePolylineRef.current = null; 
+    }
     if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null; }
     if (waypointMarkerRef.current) { waypointMarkerRef.current.setMap(null); waypointMarkerRef.current = null; }
     gasMarkersRef.current.forEach(m => m.setMap(null));
@@ -237,9 +242,22 @@ const RideMap: React.FC = () => {
     const driving = new window.AMap.Driving({ 
       map: mapRef.current, 
       hideMarkers: true, 
-      outlineColor: '#f97316', 
-      autoFitView: !isNavigating 
+      // 高德原生导航风格的路径样式
+      outlineColor: '#f97316', // 路径轮廓色（橙色）
+      autoFitView: !isNavigating,
+      // 导航模式优化配置
+      policy: window.AMap.DrivingPolicy.LEAST_TIME, // 最快路线
+      extensions: 'all', // 返回详细信息
     });
+    
+    // 自定义路径样式（如果支持）
+    if (driving.setRenderOptions) {
+      driving.setRenderOptions({
+        autoViewport: !isNavigating,
+        hideMarkers: true,
+        showTraffic: true, // 显示路况
+      });
+    }
 
     driving.search(start, targetPos, { waypoints: waypoint ? [waypoint.position] : [] }, (s: string, r: any) => {
       if (s === 'complete') {
@@ -256,6 +274,34 @@ const RideMap: React.FC = () => {
           steps: route.steps,
         });
         findGasStationsAlongRoute(allPathPoints);
+
+        // 添加自定义路径线（高德原生导航风格：更粗、更明显）
+        if (isNavigating && mapRef.current && window.AMap.Polyline) {
+          // 清除旧的路径线
+          if (customRoutePolylineRef.current) {
+            customRoutePolylineRef.current.setMap(null);
+          }
+          
+          // 创建高德原生风格的路径线
+          const pathLngLats = allPathPoints.map((p: any) => 
+            p.lng != null ? new window.AMap.LngLat(p.lng, p.lat) : new window.AMap.LngLat(p[0], p[1])
+          );
+          
+          customRoutePolylineRef.current = new window.AMap.Polyline({
+            path: pathLngLats,
+            isOutline: true,
+            outlineColor: '#ffffff', // 白色轮廓
+            borderWeight: 4, // 轮廓宽度
+            strokeColor: '#f97316', // 橙色主路径
+            strokeOpacity: 1,
+            strokeWeight: 12, // 更粗的路径（高德原生约10-15px）
+            strokeStyle: 'solid',
+            lineJoin: 'round',
+            lineCap: 'round',
+            zIndex: 50, // 确保路径在最上层
+            map: mapRef.current,
+          });
+        }
 
         if (isNavigating) {
           // 不再在此处自动播报，交由距离档位 500/200/50m 触发
@@ -401,14 +447,16 @@ const RideMap: React.FC = () => {
 
     const pos = lastPositionRef.current;
     if (isNavigating) {
-      mapRef.current.setPitch(70);
-      mapRef.current.setZoom(19);
+      // 高德原生导航视角
+      mapRef.current.setPitch(75);
+      mapRef.current.setZoom(19.5);
       smoothFollowRef.current?.setCurrent(pos, lastHeadingRef.current);
       mapRef.current.setCenter(pos);
       mapRef.current.setRotation(lastHeadingRef.current);
     } else {
       mapRef.current.setCenter(pos);
       mapRef.current.setZoom(16);
+      mapRef.current.setPitch(45); // 非导航模式恢复标准视角
     }
   }, [isNavigating, requestLocationPermission]);
 
@@ -449,7 +497,29 @@ const RideMap: React.FC = () => {
       pitch: 45,
       mapStyle: 'amap://styles/dark',
       rotation: 0,
+      // 高德原生导航风格配置
+      buildingAnimation: true, // 建筑物3D动画
+      expandZoomRange: true, // 扩展缩放范围
+      zooms: [3, 20], // 缩放级别范围
+      features: ['bg', 'point', 'road', 'building'], // 显示要素
+      showBuildingBlock: true, // 显示建筑物
+      showLabel: true, // 显示标签
+      defaultCursor: 'default',
+      isHotspot: false,
+      // 注意：mapStyle在初始化时使用dark，导航模式会切换
     });
+    
+    // 添加路况图层（实时交通）
+    if (window.AMap.TileLayer && window.AMap.TileLayer.Traffic) {
+      const trafficLayer = new window.AMap.TileLayer.Traffic({
+        zIndex: 10,
+        opacity: 0.8,
+        autoRefresh: true,
+        interval: 180,
+      });
+      trafficLayer.setMap(map);
+    }
+    
     map.on('complete', () => {
       setMapLoaded(true);
       startTracking();
@@ -471,28 +541,49 @@ const RideMap: React.FC = () => {
       console.warn('Geolocation not available for watchPosition');
       return;
     }
+    // 高德原生导航级别的定位精度配置
     const geoOptions: PositionOptions = {
-      enableHighAccuracy: true,
-      maximumAge: 2000,
-      timeout: 10000,
+      enableHighAccuracy: true, // 启用高精度GPS
+      maximumAge: 1000, // 降低缓存时间，获取更实时位置（高德原生约1秒）
+      timeout: 8000, // 超时时间
     };
+    // 节流：避免过于频繁的更新（高德原生导航约1-2秒更新一次）
+    let lastUpdateTime = 0;
+    
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
+        const now = Date.now();
+        const isNav = isNavigatingRef.current;
+        const UPDATE_INTERVAL = isNav ? 1000 : 2000; // 导航模式1秒，普通模式2秒
+        
+        // 节流：避免过于频繁的更新
+        if (now - lastUpdateTime < UPDATE_INTERVAL) {
+          return;
+        }
+        lastUpdateTime = now;
+        
         const newPos: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+        const speed = pos.coords.speed ?? 0;
+        const altitude = pos.coords.altitude ?? 0;
+        
         // 更新位置引用和状态
         lastPositionRef.current = newPos;
         setCurrentLocation(newPos);
         setRiders((prev) =>
           prev.map((r) =>
             r.id === 'me'
-              ? { ...r, position: newPos, speed: pos.coords.speed ?? 0, altitude: pos.coords.altitude ?? 0 }
+              ? { ...r, position: newPos, speed, altitude }
               : r
           )
         );
+        
         if (!mapRef.current) return;
-        if (isNavigatingRef.current) {
-          const speed = pos.coords.speed ?? 0;
+        
+        if (isNav) {
+          // 导航模式：使用平滑跟随（高德原生风格）
           smoothFollowRef.current?.setTarget(newPos, lastHeadingRef.current, speed);
+          
+          // 偏航检测（高德原生导航会在偏离50米时重新规划）
           const path = routePathRef.current;
           if (path.length >= 2) {
             const { distance } = pointToPathDistance(newPos, path);
@@ -504,8 +595,10 @@ const RideMap: React.FC = () => {
             }
           }
         } else {
+          // 非导航模式：直接更新中心点（不需要平滑）
           mapRef.current.setCenter(newPos);
         }
+        
         // 清除错误状态
         if (locationError) {
           setLocationError(null);
@@ -523,22 +616,36 @@ const RideMap: React.FC = () => {
     );
   }, [isNavigating, locationError]);
 
-  // 导航中：屏幕常亮 + 平滑视角 + 3D跟随模式
+  // 导航中：屏幕常亮 + 平滑视角 + 3D跟随模式（高德原生风格）
   useEffect(() => {
     if (!isNavigating || !mapRef.current) return;
     requestWakeLock();
     const map = mapRef.current;
-    // 设置高德原生风格的3D导航视角
-    map.setPitch(70); // 更高的俯视角度，更接近高德原生
-    map.setZoom(19); // 更近的缩放级别
+    
+    // 高德原生导航风格的3D视角配置
+    map.setPitch(75); // 更高的俯视角度（高德原生约75-80度）
+    map.setZoom(19.5); // 更近的缩放级别，接近车道级
     map.setRotation(lastHeadingRef.current);
     map.setCenter(lastPositionRef.current);
     
+    // 启用建筑物3D显示（高德原生导航特色）
+    if (map.setFeatures) {
+      map.setFeatures(['bg', 'point', 'road', 'building']);
+    }
+    
+    // 切换到导航专用地图样式（如果可用）
+    try {
+      map.setMapStyle('amap://styles/normal'); // 标准样式更适合导航
+    } catch (e) {
+      console.log('Map style not available');
+    }
+    
     if (!smoothFollowRef.current) {
-      // 使用更激进的平滑系数，实现车头超前效果
-      smoothFollowRef.current = createSmoothFollow(0.18, 0.2);
+      // 使用更激进的平滑系数，实现高德原生般的流畅跟随
+      smoothFollowRef.current = createSmoothFollow(0.22, 0.25); // 更快的响应速度
       smoothFollowRef.current.start(map, lastPositionRef.current, lastHeadingRef.current);
     }
+    
     return () => {
       smoothFollowRef.current?.stop();
       smoothFollowRef.current = null;
