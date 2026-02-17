@@ -10,6 +10,8 @@ export interface WPUser {
   username: string;
   email: string;
   name: string;
+  /** WordPress 用户角色（`/users/me` 可能返回） */
+  roles?: string[];
   avatar_urls?: {
     24?: string;
     48?: string;
@@ -119,15 +121,18 @@ export const getCurrentUser = async (): Promise<WPUser | null> => {
       return null;
     }
 
-    // 获取用户信息
-    const userResponse = await fetch(`${WP_BASE_URL}/users/me`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
+    // 获取用户信息（优先 context=edit 以拿到 roles 等字段；失败则回退）
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const userResponse = await fetch(`${WP_BASE_URL}/users/me?context=edit`, { headers });
     if (userResponse.ok) {
       const user = await userResponse.json();
+      localStorage.setItem('wp_user', JSON.stringify(user));
+      return user;
+    }
+
+    const fallbackUserResponse = await fetch(`${WP_BASE_URL}/users/me`, { headers });
+    if (fallbackUserResponse.ok) {
+      const user = await fallbackUserResponse.json();
       localStorage.setItem('wp_user', JSON.stringify(user));
       return user;
     }
@@ -145,6 +150,7 @@ export const getCurrentUser = async (): Promise<WPUser | null> => {
 export const logout = (): void => {
   localStorage.removeItem('wp_jwt_token');
   localStorage.removeItem('wp_user');
+  localStorage.removeItem('user_role');
 };
 
 /**

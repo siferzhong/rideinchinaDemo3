@@ -3,7 +3,7 @@
  * 检查用户角色和权限
  */
 
-import { getCurrentUser } from './auth';
+import { getCachedUser, getCurrentUser } from './auth';
 
 const WP_BASE_URL = 'https://www.rideinchina.com/wp-json/wp/v2';
 
@@ -37,15 +37,22 @@ export const getUserRole = async (): Promise<UserRole> => {
 
     if (response.ok) {
       const data = await response.json();
-      return data.role || 'user';
+      const role = (data.role || 'user') as UserRole;
+      localStorage.setItem('user_role', role);
+      return role;
     }
   } catch (error) {
     console.error('Failed to get user role:', error);
   }
 
-  // 默认检查 WordPress 用户角色
-  // 管理员通常是 WordPress administrator
-  // 这里可以从 WordPress 用户元数据获取自定义角色
+  // 兜底：如果后端 `user-role` 接口不可用，尝试从 `/users/me` 返回的 roles 判断是否为 WP 管理员
+  const cachedUser = getCachedUser() as any;
+  if (cachedUser?.roles && Array.isArray(cachedUser.roles) && cachedUser.roles.includes('administrator')) {
+    localStorage.setItem('user_role', 'admin');
+    return 'admin';
+  }
+
+  // 再兜底：使用本地缓存角色（若曾成功获取过）
   const cachedRole = localStorage.getItem('user_role');
   if (cachedRole) {
     return cachedRole as UserRole;
