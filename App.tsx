@@ -31,6 +31,15 @@ const AppContent: React.FC = () => {
     checkPermissions();
   }, [isAuthenticated]);
 
+  // 监听来自 Me 页面的"切换到 Admin"事件
+  useEffect(() => {
+    const handleNavigateToAdmin = () => {
+      setActiveTab(AppTab.ADMIN);
+    };
+    window.addEventListener('navigate-to-admin', handleNavigateToAdmin);
+    return () => window.removeEventListener('navigate-to-admin', handleNavigateToAdmin);
+  }, []);
+
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.HOME: return <Home onNavigate={setActiveTab} />;

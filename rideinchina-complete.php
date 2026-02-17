@@ -1,17 +1,23 @@
-# WordPress 插件代码 - 完整版
-
-将以下代码保存为 `rideinchina-complete.php` 并上传到 WordPress 的 `/wp-content/plugins/rideinchina-complete/` 目录。
-
-```php
 <?php
 /**
  * Plugin Name: Ride In China Complete API
- * Description: Complete REST API endpoints for Ride In China app - User data, permissions, group destinations, group chat
- * Version: 1.0.0
+ * Description: Complete REST API endpoints for Ride In China app - User data, permissions, group destinations, group chat, group locations
+ * Version: 1.1.1
+ * Author: Ride In China
  */
 
-add_action('rest_api_init', function () {
-    // ========== 用户数据端点（已有） ==========
+// 防止直接访问
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+// 防止函数重复定义
+if (!function_exists('rideinchina_init_api')) {
+    add_action('rest_api_init', 'rideinchina_init_api');
+}
+
+function rideinchina_init_api() {
+    // ========== 用户数据端点 ==========
     register_rest_route('wp/v2', '/rideinchina/user-data', array(
         'methods' => 'POST',
         'callback' => 'rideinchina_save_user_data',
@@ -35,45 +41,45 @@ add_action('rest_api_init', function () {
     register_rest_route('wp/v2', '/rideinchina/group-destination', array(
         'methods' => 'GET',
         'callback' => 'rideinchina_get_group_destination',
-        'permission_callback' => '__return_true', // 所有人都可以查看
+        'permission_callback' => '__return_true',
     ));
 
     register_rest_route('wp/v2', '/rideinchina/group-destination', array(
         'methods' => 'POST',
         'callback' => 'rideinchina_set_group_destination',
-        'permission_callback' => 'rideinchina_check_leader', // 仅管理员和领队
+        'permission_callback' => 'rideinchina_check_leader',
     ));
 
     register_rest_route('wp/v2', '/rideinchina/group-destination', array(
         'methods' => 'DELETE',
         'callback' => 'rideinchina_clear_group_destination',
-        'permission_callback' => 'rideinchina_check_admin', // 仅管理员
+        'permission_callback' => 'rideinchina_check_admin',
     ));
 
     // ========== 群消息端点 ==========
     register_rest_route('wp/v2', '/rideinchina/group-messages', array(
         'methods' => 'GET',
         'callback' => 'rideinchina_get_group_messages',
-        'permission_callback' => '__return_true', // 所有人都可以查看
+        'permission_callback' => '__return_true',
     ));
 
     register_rest_route('wp/v2', '/rideinchina/group-messages', array(
         'methods' => 'POST',
         'callback' => 'rideinchina_send_group_message',
-        'permission_callback' => 'rideinchina_check_leader', // 仅管理员和领队
+        'permission_callback' => 'rideinchina_check_leader',
     ));
 
-    // ========== 群位置共享端点 ==========
+    // ========== 群位置共享端点（新增）==========
     register_rest_route('wp/v2', '/rideinchina/group-locations', array(
         'methods' => 'GET',
         'callback' => 'rideinchina_get_group_locations',
-        'permission_callback' => 'rideinchina_check_auth', // 仅登录用户可查看
+        'permission_callback' => 'rideinchina_check_auth',
     ));
 
     register_rest_route('wp/v2', '/rideinchina/group-locations', array(
         'methods' => 'POST',
         'callback' => 'rideinchina_upsert_group_location',
-        'permission_callback' => 'rideinchina_check_auth', // 仅登录用户可上报
+        'permission_callback' => 'rideinchina_check_auth',
     ));
 
     // ========== 管理员端点 ==========
@@ -106,14 +112,17 @@ add_action('rest_api_init', function () {
         'callback' => 'rideinchina_set_user_role',
         'permission_callback' => 'rideinchina_check_admin',
     ));
-});
+}
 
 // ========== 权限检查函数 ==========
 
+if (!function_exists('rideinchina_check_auth')) {
 function rideinchina_check_auth() {
     return is_user_logged_in();
 }
+}
 
+if (!function_exists('rideinchina_check_admin')) {
 function rideinchina_check_admin() {
     if (!is_user_logged_in()) {
         return false;
@@ -122,7 +131,9 @@ function rideinchina_check_admin() {
     $role = get_user_meta($user->ID, 'rideinchina_role', true);
     return $role === 'admin' || user_can($user, 'administrator');
 }
+}
 
+if (!function_exists('rideinchina_check_leader')) {
 function rideinchina_check_leader() {
     if (!is_user_logged_in()) {
         return false;
@@ -131,9 +142,11 @@ function rideinchina_check_leader() {
     $role = get_user_meta($user->ID, 'rideinchina_role', true);
     return $role === 'admin' || $role === 'leader' || user_can($user, 'administrator');
 }
+}
 
-// ========== 用户数据函数（已有） ==========
+// ========== 用户数据函数 ==========
 
+if (!function_exists('rideinchina_save_user_data')) {
 function rideinchina_save_user_data(WP_REST_Request $request) {
     $user_id = get_current_user_id();
     $meta_key = sanitize_text_field($request['meta_key']);
@@ -146,7 +159,9 @@ function rideinchina_save_user_data(WP_REST_Request $request) {
         'meta_key' => $meta_key,
     ), 200);
 }
+}
 
+if (!function_exists('rideinchina_get_user_data')) {
 function rideinchina_get_user_data(WP_REST_Request $request) {
     $user_id = get_current_user_id();
     $meta_key = sanitize_text_field($request['meta_key']);
@@ -155,38 +170,42 @@ function rideinchina_get_user_data(WP_REST_Request $request) {
 
     return new WP_REST_Response($meta_value ?: null, 200);
 }
+}
 
 // ========== 用户角色函数 ==========
 
+if (!function_exists('rideinchina_get_user_role')) {
 function rideinchina_get_user_role(WP_REST_Request $request) {
     $user = wp_get_current_user();
     
-    // 检查 WordPress 管理员角色
     if (user_can($user, 'administrator')) {
         return new WP_REST_Response(array('role' => 'admin'), 200);
     }
     
-    // 检查自定义角色
     $role = get_user_meta($user->ID, 'rideinchina_role', true);
     if (!$role) {
-        $role = 'user'; // 默认角色
+        $role = 'user';
         update_user_meta($user->ID, 'rideinchina_role', $role);
     }
     
     return new WP_REST_Response(array('role' => $role), 200);
 }
+}
 
 // ========== 群目的地函数 ==========
 
+if (!function_exists('rideinchina_get_group_destination')) {
 function rideinchina_get_group_destination(WP_REST_Request $request) {
     $destination = get_option('rideinchina_group_destination', null);
     return new WP_REST_Response($destination, 200);
 }
+}
 
+if (!function_exists('rideinchina_set_group_destination')) {
 function rideinchina_set_group_destination(WP_REST_Request $request) {
     $user = wp_get_current_user();
     $name = sanitize_text_field($request['name']);
-    $position = $request['position']; // [lng, lat]
+    $position = $request['position'];
     $address = sanitize_text_field($request['address'] ?? '');
 
     if (!$name || !$position || count($position) !== 2) {
@@ -211,38 +230,41 @@ function rideinchina_set_group_destination(WP_REST_Request $request) {
 
     return new WP_REST_Response($destination, 200);
 }
+}
 
+if (!function_exists('rideinchina_clear_group_destination')) {
 function rideinchina_clear_group_destination(WP_REST_Request $request) {
     delete_option('rideinchina_group_destination');
     return new WP_REST_Response(array('success' => true), 200);
 }
+}
 
 // ========== 群消息函数 ==========
 
+if (!function_exists('rideinchina_get_group_messages')) {
 function rideinchina_get_group_messages(WP_REST_Request $request) {
     $limit = intval($request->get_param('limit') ?: 50);
     $since = $request->get_param('since');
     
     $messages = get_option('rideinchina_group_messages', array());
     
-    // 按时间戳排序（最新的在前）
     usort($messages, function($a, $b) {
         return strtotime($b['timestamp']) - strtotime($a['timestamp']);
     });
     
-    // 如果有 since 参数，只返回之后的消息
     if ($since) {
         $messages = array_filter($messages, function($msg) use ($since) {
             return strtotime($msg['timestamp']) > strtotime($since);
         });
     }
     
-    // 限制数量
     $messages = array_slice($messages, 0, $limit);
     
     return new WP_REST_Response(array('messages' => array_values($messages)), 200);
 }
+}
 
+if (!function_exists('rideinchina_send_group_message')) {
 function rideinchina_send_group_message(WP_REST_Request $request) {
     $user = wp_get_current_user();
     $message = sanitize_text_field($request['message'] ?? '');
@@ -280,7 +302,6 @@ function rideinchina_send_group_message(WP_REST_Request $request) {
     $messages = get_option('rideinchina_group_messages', array());
     $messages[] = $new_message;
     
-    // 只保留最近 100 条消息
     if (count($messages) > 100) {
         usort($messages, function($a, $b) {
             return strtotime($a['timestamp']) - strtotime($b['timestamp']);
@@ -292,9 +313,11 @@ function rideinchina_send_group_message(WP_REST_Request $request) {
 
     return new WP_REST_Response($new_message, 200);
 }
+}
 
-// ========== 群位置共享函数 ==========
+// ========== 群位置共享函数（新增）==========
 
+if (!function_exists('rideinchina_upsert_group_location')) {
 function rideinchina_upsert_group_location(WP_REST_Request $request) {
     $user = wp_get_current_user();
     $lng = floatval($request->get_param('lng'));
@@ -329,7 +352,7 @@ function rideinchina_upsert_group_location(WP_REST_Request $request) {
         'timestamp' => current_time('mysql'),
     );
 
-    // 清理过期（10分钟未更新）
+    // 清理过期位置（10分钟未更新）
     $now = time();
     foreach ($locations as $key => $loc) {
         $ts = isset($loc['timestamp']) ? strtotime($loc['timestamp']) : 0;
@@ -341,12 +364,13 @@ function rideinchina_upsert_group_location(WP_REST_Request $request) {
     update_option('rideinchina_group_locations', $locations);
     return new WP_REST_Response(array('success' => true), 200);
 }
+}
 
+if (!function_exists('rideinchina_get_group_locations')) {
 function rideinchina_get_group_locations(WP_REST_Request $request) {
     $locations = get_option('rideinchina_group_locations', array());
     if (!is_array($locations)) $locations = array();
 
-    // 转成数组并按时间倒序
     $riders = array_values($locations);
     usort($riders, function($a, $b) {
         return strtotime($b['timestamp'] ?? '') - strtotime($a['timestamp'] ?? '');
@@ -354,9 +378,11 @@ function rideinchina_get_group_locations(WP_REST_Request $request) {
 
     return new WP_REST_Response(array('riders' => $riders), 200);
 }
+}
 
 // ========== 管理员函数 ==========
 
+if (!function_exists('rideinchina_get_all_users')) {
 function rideinchina_get_all_users(WP_REST_Request $request) {
     $users = get_users();
     $result = array();
@@ -381,7 +407,9 @@ function rideinchina_get_all_users(WP_REST_Request $request) {
 
     return new WP_REST_Response(array('users' => $result), 200);
 }
+}
 
+if (!function_exists('rideinchina_get_all_user_documents')) {
 function rideinchina_get_all_user_documents(WP_REST_Request $request) {
     $users = get_users();
     $result = array();
@@ -403,7 +431,9 @@ function rideinchina_get_all_user_documents(WP_REST_Request $request) {
 
     return new WP_REST_Response(array('users' => $result), 200);
 }
+}
 
+if (!function_exists('rideinchina_update_document_status')) {
 function rideinchina_update_document_status(WP_REST_Request $request) {
     $user_id = intval($request['user_id']);
     $doc_id = sanitize_text_field($request['doc_id']);
@@ -426,7 +456,9 @@ function rideinchina_update_document_status(WP_REST_Request $request) {
 
     return new WP_REST_Response(array('success' => true), 200);
 }
+}
 
+if (!function_exists('rideinchina_upload_permit')) {
 function rideinchina_upload_permit(WP_REST_Request $request) {
     $user_id = intval($request['user_id']);
     $permit_number = sanitize_text_field($request['permitNumber']);
@@ -452,7 +484,9 @@ function rideinchina_upload_permit(WP_REST_Request $request) {
 
     return new WP_REST_Response(array('success' => true, 'permit' => $new_permit), 200);
 }
+}
 
+if (!function_exists('rideinchina_set_user_role')) {
 function rideinchina_set_user_role(WP_REST_Request $request) {
     $user_id = intval($request['user_id']);
     $role = sanitize_text_field($request['role']);
@@ -465,35 +499,4 @@ function rideinchina_set_user_role(WP_REST_Request $request) {
 
     return new WP_REST_Response(array('success' => true), 200);
 }
-```
-
-## 安装步骤
-
-1. 在 WordPress 的 `/wp-content/plugins/` 目录创建文件夹 `rideinchina-complete`
-2. 在该文件夹中创建 `rideinchina-complete.php` 文件
-3. 粘贴上面的代码
-4. 在 WordPress 后台激活插件
-
-## 设置第一个管理员
-
-在 WordPress 数据库中执行以下 SQL（或通过 phpMyAdmin）：
-
-```sql
-UPDATE wp_usermeta 
-SET meta_value = 'admin' 
-WHERE meta_key = 'rideinchina_role' 
-AND user_id = YOUR_ADMIN_USER_ID;
-```
-
-或者通过 WordPress 后台的"用户"页面，编辑你的用户，在"自定义字段"中添加：
-- 键：`rideinchina_role`
-- 值：`admin`
-
-## 功能说明
-
-1. **用户角色管理**：通过用户元数据 `rideinchina_role` 存储角色（admin/leader/user）
-2. **群目的地**：存储在 WordPress options 表中
-3. **群消息**：存储在 WordPress options 表中，最多保留 100 条
-4. **用户数据**：存储在用户元数据中
-
-所有端点都已实现，可以开始测试了！
+}

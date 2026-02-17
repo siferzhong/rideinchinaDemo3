@@ -23,6 +23,8 @@ const Admin: React.FC = () => {
   const [docPreview, setDocPreview] = useState<DocPreview>(null);
   const [sendingMedia, setSendingMedia] = useState(false);
   const messageMediaInputRef = React.useRef<HTMLInputElement>(null);
+  const [docFilter, setDocFilter] = useState<'all' | 'pending' | 'verified' | 'rejected'>('all');
+  const [userSearch, setUserSearch] = useState('');
 
   useEffect(() => {
     const init = async () => {
@@ -173,14 +175,53 @@ const Admin: React.FC = () => {
     );
   }
 
+  // 计算统计数据
+  const stats = {
+    totalUsers: users.length,
+    pendingDocs: userDocuments.reduce((sum, u) => sum + u.documents.filter(d => d.status === 'Pending').length, 0),
+    totalMessages: groupMessages.length,
+    hasDestination: !!groupDestination?.isActive,
+  };
+
   return (
     <div className="h-full flex flex-col bg-slate-50">
-      {/* Header */}
+      {/* Header with Stats */}
       <div className="bg-gradient-to-r from-orange-600 to-orange-500 p-6 text-white">
-        <h1 className="text-2xl font-black mb-2">
-          {permissions.role === 'admin' ? 'Admin Panel' : 'Leader Panel'}
-        </h1>
-        <p className="text-white/90 text-sm">{user?.name}</p>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-black mb-1">
+              {permissions.role === 'admin' ? 'Admin Panel' : 'Leader Panel'}
+            </h1>
+            <p className="text-white/90 text-sm">{user?.name}</p>
+          </div>
+          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+            <i className="fa-solid fa-shield-halved text-2xl"></i>
+          </div>
+        </div>
+
+        {/* 统计卡片 */}
+        {permissions.role === 'admin' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white/10 backdrop-blur rounded-xl p-3 border border-white/20">
+              <div className="text-white/70 text-[10px] font-bold uppercase mb-1">Users</div>
+              <div className="text-white text-2xl font-black">{stats.totalUsers}</div>
+            </div>
+            <div className="bg-white/10 backdrop-blur rounded-xl p-3 border border-white/20">
+              <div className="text-white/70 text-[10px] font-bold uppercase mb-1">Pending Docs</div>
+              <div className="text-white text-2xl font-black">{stats.pendingDocs}</div>
+            </div>
+            <div className="bg-white/10 backdrop-blur rounded-xl p-3 border border-white/20">
+              <div className="text-white/70 text-[10px] font-bold uppercase mb-1">Messages</div>
+              <div className="text-white text-2xl font-black">{stats.totalMessages}</div>
+            </div>
+            <div className="bg-white/10 backdrop-blur rounded-xl p-3 border border-white/20">
+              <div className="text-white/70 text-[10px] font-bold uppercase mb-1">Destination</div>
+              <div className="text-white text-lg font-black">
+                {stats.hasDestination ? '✓ Active' : '✗ None'}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -235,14 +276,43 @@ const Admin: React.FC = () => {
       <div className="flex-1 overflow-y-auto p-4">
         {activeTab === 'documents' && permissions.role === 'admin' && (
           <div className="space-y-4">
-            {userDocuments.length === 0 ? (
+            {/* 文档筛选 */}
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {(['all', 'pending', 'verified', 'rejected'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setDocFilter(filter)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                    docFilter === filter
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  {filter === 'all' && `All (${userDocuments.reduce((s, u) => s + u.documents.length, 0)})`}
+                  {filter === 'pending' && `Pending (${userDocuments.reduce((s, u) => s + u.documents.filter(d => d.status === 'Pending').length, 0)})`}
+                  {filter === 'verified' && `Verified (${userDocuments.reduce((s, u) => s + u.documents.filter(d => d.status === 'Verified').length, 0)})`}
+                  {filter === 'rejected' && `Rejected (${userDocuments.reduce((s, u) => s + u.documents.filter(d => d.status === 'Rejected').length, 0)})`}
+                </button>
+              ))}
+            </div>
+
+            {userDocuments.filter(u => 
+              docFilter === 'all' || u.documents.some(d => d.status === (docFilter.charAt(0).toUpperCase() + docFilter.slice(1)) as any)
+            ).length === 0 ? (
               <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-500">
                 <i className="fa-solid fa-folder-open text-4xl mb-3 text-slate-300"></i>
                 <p className="font-medium">暂无用户上传证件</p>
                 <p className="text-sm mt-1">用户在 App 的 Me 页上传后，会在此显示</p>
               </div>
             ) : (
-              userDocuments.map((userDoc) => (
+              userDocuments
+                .filter(u => docFilter === 'all' || u.documents.some(d => d.status === (docFilter.charAt(0).toUpperCase() + docFilter.slice(1)) as any))
+                .map((userDoc) => {
+                  const filteredDocs = docFilter === 'all' 
+                    ? userDoc.documents 
+                    : userDoc.documents.filter(d => d.status === (docFilter.charAt(0).toUpperCase() + docFilter.slice(1)) as any);
+                  if (filteredDocs.length === 0) return null;
+                  return (
                 <div key={userDoc.userId} className="bg-white rounded-2xl p-4 border border-slate-200">
                   <div className="flex items-center justify-between mb-3">
                     <div>
@@ -251,7 +321,7 @@ const Admin: React.FC = () => {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    {userDoc.documents.map((doc) => (
+                    {filteredDocs.map((doc) => (
                       <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-bold text-slate-800">{doc.type}</p>
@@ -290,7 +360,8 @@ const Admin: React.FC = () => {
                     ))}
                   </div>
                 </div>
-              ))
+                  );
+                }).filter(Boolean)
             )}
             {/* 证件图片预览弹窗 */}
             {docPreview && (
@@ -320,7 +391,23 @@ const Admin: React.FC = () => {
 
         {activeTab === 'users' && permissions.role === 'admin' && (
           <div className="space-y-3">
-            {users.map((u) => (
+            {/* 用户搜索 */}
+            <div className="relative">
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Search users by name or email..."
+                className="w-full px-4 py-3 pl-10 bg-white border border-slate-200 rounded-xl text-sm"
+              />
+              <i className="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            </div>
+
+            {users.filter(u => 
+              !userSearch || 
+              u.name.toLowerCase().includes(userSearch.toLowerCase()) || 
+              u.email.toLowerCase().includes(userSearch.toLowerCase())
+            ).map((u) => (
               <div key={u.id} className="bg-white rounded-2xl p-4 border border-slate-200">
                 <div className="flex items-center justify-between">
                   <div>

@@ -6,6 +6,7 @@ import { createSmoothFollow, cancelSmoothUpdate } from '../utils/smoothMap';
 import { getGroupDestination } from '../services/groupDestination';
 import { getGroupMessages, getLatestMessages } from '../services/groupChat';
 import { getUserPermissions } from '../services/permissions';
+import { getGroupLocations, upsertMyLocation, type GroupRiderLocation } from '../services/groupLocation';
 import type { GroupDestination } from '../services/groupDestination';
 import type { GroupMessage } from '../services/groupChat';
 
@@ -24,7 +25,9 @@ interface RiderStatus {
   name: string;
   role: 'leader' | 'member';
   position: [number, number];
+  /** km/h（从 Geolocation speed m/s 转换） */
   speed: number;
+  /** meters（可能为 0/缺失） */
   altitude: number;
   heading?: number;
 }
@@ -250,6 +253,13 @@ const RideMap: React.FC = () => {
   const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
   const [permissions, setPermissions] = useState<any>(null);
   const [showGroupMessages, setShowGroupMessages] = useState(false);
+  const [destName, setDestName] = useState<string>('Destination');
+  const [externalNavTarget, setExternalNavTarget] = useState<{ position: [number, number]; name: string } | null>(null);
+  const [followMe, setFollowMe] = useState(true);
+  const [groupRiders, setGroupRiders] = useState<GroupRiderLocation[]>([]);
+  const groupMarkersRef = useRef<Record<string, any>>({});
+  const lastLocationShareAtRef = useRef<number>(0);
+  const myUserIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     destPositionRef.current = destPosition;
@@ -261,7 +271,6 @@ const RideMap: React.FC = () => {
 
   const [riders, setRiders] = useState<RiderStatus[]>([
     { id: 'me', name: 'You', role: 'leader', speed: 0, altitude: 0, position: [0, 0] },
-    { id: 'rider2', name: 'Hans', role: 'member', speed: 45, altitude: 500, position: [0, 0] },
   ]);
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
 
@@ -279,6 +288,7 @@ const RideMap: React.FC = () => {
         // 如果有群目的地，自动设置为目的地
         if (dest && dest.isActive && !destPosition) {
           setDestPosition(dest.position);
+          setDestName(dest.name || 'Destination');
         }
       } catch (error) {
         console.error('Failed to load group data:', error);
@@ -290,6 +300,82 @@ const RideMap: React.FC = () => {
     const interval = setInterval(loadGroupData, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // 读取当前用户ID（用于区分自己的群位置点）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('wp_user');
+      if (!raw) return;
+      const u = JSON.parse(raw);
+      if (u?.id) myUserIdRef.current = Number(u.id);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // 群位置共享：轮询拉取 + 更新地图上的队友标记
+  useEffect(() => {
+    const token = localStorage.getItem('wp_jwt_token');
+    if (!token) return;
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const riders = await getGroupLocations();
+        if (!cancelled) setGroupRiders(riders);
+      } catch (e) {
+        // 静默失败：不影响主体验
+      }
+    };
+
+    load();
+    const interval = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || !window.AMap) return;
+    const map = mapRef.current;
+    const aliveKeys = new Set<string>();
+
+    groupRiders.forEach((r) => {
+      if (!r?.position) return;
+      if (myUserIdRef.current && r.userId === myUserIdRef.current) return; // 自己不画“队友点”
+
+      const key = String(r.userId);
+      aliveKeys.add(key);
+      const pos: [number, number] = [r.position[0], r.position[1]];
+      const isLeader = r.userRole === 'admin' || r.userRole === 'leader';
+      const bg = isLeader ? 'linear-gradient(135deg,#f97316 0%,#ea580c 100%)' : 'linear-gradient(135deg,#64748b 0%,#475569 100%)';
+      const border = isLeader ? '#fdba74' : '#cbd5e1';
+      const label = (r.userName || 'Rider').slice(0, 2);
+
+      if (!groupMarkersRef.current[key]) {
+        groupMarkersRef.current[key] = new window.AMap.Marker({
+          position: pos,
+          map,
+          content: `<div style="width:34px;height:34px;border-radius:18px;background:${bg};border:2px solid ${border};display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.35)">${label}</div>`,
+          offset: new window.AMap.Pixel(-17, -17),
+          zIndex: isLeader ? 65 : 60,
+        });
+      } else {
+        groupMarkersRef.current[key].setPosition(pos);
+      }
+    });
+
+    // 清理已离线的标记
+    Object.keys(groupMarkersRef.current).forEach((key) => {
+      if (!aliveKeys.has(key)) {
+        try {
+          groupMarkersRef.current[key].setMap(null);
+        } catch {}
+        delete groupMarkersRef.current[key];
+      }
+    });
+  }, [groupRiders]);
 
   // 加载和轮询群消息
   useEffect(() => {
@@ -458,6 +544,11 @@ const RideMap: React.FC = () => {
     const start = fromPosition ?? riders[0].position;
     setDestPosition(targetPos);
     if (!startPosition) setStartPosition(start);
+
+    // 预览视角：给一点 3D 观感（不进入 turn-by-turn 导航）
+    try {
+      mapRef.current.setPitch(55);
+    } catch {}
 
     if (destMarkerRef.current) destMarkerRef.current.setMap(null);
     if (waypointMarkerRef.current) waypointMarkerRef.current.setMap(null);
@@ -747,6 +838,7 @@ const RideMap: React.FC = () => {
 
   const centerOnMe = useCallback(() => {
     if (!mapRef.current) return;
+    setFollowMe(true);
     
     // 如果位置还是默认值（成都），主动请求定位
     const isDefaultPos = lastPositionRef.current[0] === 104.066 && lastPositionRef.current[1] === 30.572;
@@ -881,8 +973,8 @@ const RideMap: React.FC = () => {
         setDestPosition(data.destPosition);
         setActiveWaypoint(data.activeWaypoint);
         setStartPosition(data.startPosition);
-        setIsNavigating(data.isNavigating);
-        if (data.isNavigating) setIsAdjusting(true);
+        // B方案：App 内仅做预览，不做 turn-by-turn 导航
+        setIsNavigating(false);
       }
     });
     
@@ -900,14 +992,14 @@ const RideMap: React.FC = () => {
       maximumAge: 1000, // 降低缓存时间，获取更实时位置（高德原生约1秒）
       timeout: 8000, // 超时时间
     };
-    // 节流：避免过于频繁的更新（高德原生导航约1-2秒更新一次）
+    // 节流：避免过于频繁的更新（预览/共享位置 1秒足够）
     let lastUpdateTime = 0;
     
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const now = Date.now();
         const isNav = isNavigatingRef.current;
-        const UPDATE_INTERVAL = isNav ? 1000 : 2000; // 导航模式1秒，普通模式2秒
+        const UPDATE_INTERVAL = 1000;
         
         // 节流：避免过于频繁的更新
         if (now - lastUpdateTime < UPDATE_INTERVAL) {
@@ -916,8 +1008,9 @@ const RideMap: React.FC = () => {
         lastUpdateTime = now;
         
         const newPos: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-        const speed = pos.coords.speed ?? 0;
-        const altitude = pos.coords.altitude ?? 0;
+        const speedMs = pos.coords.speed;
+        const speed = speedMs != null ? Math.max(0, speedMs * 3.6) : 0; // km/h
+        const altitude = pos.coords.altitude != null ? pos.coords.altitude : 0;
         
         // 更新位置引用和状态
         lastPositionRef.current = newPos;
@@ -948,8 +1041,27 @@ const RideMap: React.FC = () => {
             }
           }
         } else {
-          // 非导航模式：直接更新中心点（不需要平滑）
-          mapRef.current.setCenter(newPos);
+          // 预览模式：仅在开启“跟随我”时跟随
+          if (followMe) {
+            mapRef.current.setCenter(newPos);
+          }
+        }
+
+        // 群位置共享：每5秒上报一次（登录用户）
+        try {
+          const token = localStorage.getItem('wp_jwt_token');
+          if (token && now - lastLocationShareAtRef.current > 5000) {
+            lastLocationShareAtRef.current = now;
+            upsertMyLocation({
+              lng: newPos[0],
+              lat: newPos[1],
+              speedKmh: speed || undefined,
+              altitudeM: altitude || undefined,
+              heading: lastHeadingRef.current || undefined,
+            }).catch(() => {});
+          }
+        } catch {
+          // ignore
         }
         
         // 清除错误状态
@@ -967,7 +1079,7 @@ const RideMap: React.FC = () => {
       },
       geoOptions
     );
-  }, [isNavigating, locationError]);
+  }, [isNavigating, locationError, followMe]);
 
   // 导航中：屏幕常亮 + 平滑视角 + 3D跟随模式（高德原生风格）
   useEffect(() => {
@@ -1359,10 +1471,32 @@ const RideMap: React.FC = () => {
         >
           <i className="fa-solid fa-location-crosshairs text-xl"></i>
         </button>
+        <button
+          onClick={() => setFollowMe((v) => !v)}
+          className={`w-12 h-12 rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border ${
+            followMe ? 'bg-orange-600 text-white border-orange-400' : 'bg-slate-900 text-slate-300 border-slate-700'
+          }`}
+          title={followMe ? '已开启跟随' : '已关闭跟随'}
+        >
+          <i className="fa-solid fa-user-location text-xl"></i>
+        </button>
         <button onClick={() => setShowGasStations(!showGasStations)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-2xl transition-all ${showGasStations ? 'bg-green-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
           <i className="fa-solid fa-gas-pump text-xl"></i>
         </button>
       </div>
+
+      {/* 速度/海拔 HUD（始终可见：用于路上体验 & 群位置共享） */}
+      {currentLocation && (
+        <div className="absolute top-40 right-4 z-[70]">
+          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-3 shadow-2xl w-28">
+            <div className="text-[9px] text-slate-400 font-black uppercase">KM/H</div>
+            <div className="text-2xl font-black text-white italic leading-none">{Math.round(riders[0]?.speed || 0)}</div>
+            <div className="h-px bg-white/10 my-2"></div>
+            <div className="text-[9px] text-orange-400 font-black uppercase">ALT (M)</div>
+            <div className="text-xl font-black text-white italic leading-none">{Math.round(riders[0]?.altitude || 0)}</div>
+          </div>
+        </div>
+      )}
 
       {!isNavigating && !isAdjusting && (
         <div className="absolute bottom-12 left-4 right-4 z-10 space-y-3">
@@ -1371,6 +1505,7 @@ const RideMap: React.FC = () => {
             <button 
               onClick={() => {
                 setDestPosition(groupDestination.position);
+                setDestName(groupDestination.name || 'Destination');
                 setIsAdjusting(true);
                 updateRoutePreview(groupDestination.position);
               }} 
@@ -1415,7 +1550,7 @@ const RideMap: React.FC = () => {
            </div>
            <div className="flex-1 overflow-y-auto space-y-2">
               {searchResults.map(poi => (
-                <button key={poi.id} onClick={() => { setIsSearching(false); setIsAdjusting(true); updateRoutePreview([poi.location.lng, poi.location.lat]); }} className="w-full text-left bg-white/5 p-4 rounded-xl flex items-center gap-4 border border-white/5 active:bg-orange-600 transition-all">
+                <button key={poi.id} onClick={() => { setIsSearching(false); setIsAdjusting(true); setDestName(poi.name || 'Destination'); updateRoutePreview([poi.location.lng, poi.location.lat]); }} className="w-full text-left bg-white/5 p-4 rounded-xl flex items-center gap-4 border border-white/5 active:bg-orange-600 transition-all">
                   <i className="fa-solid fa-location-dot text-orange-500"></i>
                   <div className="flex-1 truncate">
                     <h4 className="text-white font-bold truncate">{poi.name}</h4>
@@ -1446,15 +1581,15 @@ const RideMap: React.FC = () => {
                 <button onClick={stopNavigation} className="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-xs">Reset</button>
                 <button 
                   onClick={() => { 
-                    setIsAdjusting(false); 
-                    setIsNavigating(true);
-                    // 开始导航时主动请求定位权限
-                    requestLocationPermission();
-                    setTimeout(() => centerOnMe(), 500);
+                    if (destPosition) {
+                      setExternalNavTarget({ position: destPosition, name: destName || 'Destination' });
+                    } else {
+                      alert('No destination selected');
+                    }
                   }} 
                   className="flex-[2] bg-orange-600 text-white text-lg font-black py-4 rounded-xl shadow-xl uppercase italic active:scale-95 transition-all"
                 >
-                  Ignition
+                  Start in Maps
                 </button>
               </div>
            </div>
@@ -1700,6 +1835,85 @@ const RideMap: React.FC = () => {
               <button
                 onClick={() => setShowPermissionGuide(false)}
                 className="px-6 bg-slate-700 text-slate-300 font-bold py-3 rounded-xl hover:bg-slate-600 active:scale-95 transition-all"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 外部地图导航（B方案：App 内预览 + 外部地图 turn-by-turn） */}
+      {externalNavTarget && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-end justify-center p-4"
+          onClick={() => setExternalNavTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-white/10">
+              <div className="text-white font-black text-lg">开始导航</div>
+              <div className="text-slate-400 text-xs mt-1 truncate">
+                {externalNavTarget.name} · {externalNavTarget.position[1].toFixed(5)},{externalNavTarget.position[0].toFixed(5)}
+              </div>
+            </div>
+
+            <div className="p-5 grid grid-cols-2 gap-3">
+              <button
+                className="bg-orange-600 text-white font-black py-4 rounded-2xl active:scale-95 transition-all"
+                onClick={() => {
+                  const [lng, lat] = externalNavTarget.position;
+                  const name = encodeURIComponent(externalNavTarget.name || 'Destination');
+                  const url = `https://uri.amap.com/navigation?to=${lng},${lat},${name}&mode=car&policy=1&src=rideinchina&coordinate=gaode`;
+                  window.location.href = url;
+                }}
+              >
+                高德地图
+              </button>
+              <button
+                className="bg-slate-800 text-white font-black py-4 rounded-2xl active:scale-95 transition-all"
+                onClick={() => {
+                  const [lng, lat] = externalNavTarget.position;
+                  const name = encodeURIComponent(externalNavTarget.name || 'Destination');
+                  const url = `https://maps.apple.com/?daddr=${lat},${lng}&q=${name}`;
+                  window.location.href = url;
+                }}
+              >
+                Apple 地图
+              </button>
+              <button
+                className="bg-slate-800 text-white font-black py-4 rounded-2xl active:scale-95 transition-all"
+                onClick={() => {
+                  const [lng, lat] = externalNavTarget.position;
+                  const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+                  window.location.href = url;
+                }}
+              >
+                Google 地图
+              </button>
+              <button
+                className="bg-slate-700 text-slate-100 font-black py-4 rounded-2xl active:scale-95 transition-all"
+                onClick={async () => {
+                  try {
+                    const [lng, lat] = externalNavTarget.position;
+                    const text = `${externalNavTarget.name} ${lat},${lng}`;
+                    await navigator.clipboard.writeText(text);
+                    alert('已复制坐标');
+                  } catch {
+                    alert('复制失败，请手动复制');
+                  }
+                }}
+              >
+                复制坐标
+              </button>
+            </div>
+
+            <div className="p-4 border-t border-white/10">
+              <button
+                className="w-full bg-slate-950 text-slate-300 font-bold py-3 rounded-2xl"
+                onClick={() => setExternalNavTarget(null)}
               >
                 关闭
               </button>

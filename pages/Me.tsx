@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { saveUserDocuments, getUserDocuments, saveTibetPermits, getTibetPermits, saveTotalDistance, getTotalDistance } from '../services/userData';
+import { getUserPermissions, type UserPermissions } from '../services/permissions';
 import LoginModal from '../components/LoginModal';
 
 interface Document {
@@ -31,6 +32,8 @@ const Me: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedDocType, setSelectedDocType] = useState<string | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [permissions, setPermissions] = useState<UserPermissions | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // 从 WordPress 或 localStorage 加载数据
   useEffect(() => {
@@ -46,6 +49,15 @@ const Me: React.FC = () => {
     };
     loadData();
   }, []);
+
+  // 获取用户权限（admin/leader/user）
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setPermissions(null);
+      return;
+    }
+    getUserPermissions().then(setPermissions).catch(() => setPermissions(null));
+  }, [isAuthenticated]);
 
   // 计算总骑行距离（从导航历史）
   const calculateTotalDistance = () => {
@@ -225,15 +237,24 @@ const Me: React.FC = () => {
           <div className="flex-1 min-w-0">
             {isAuthenticated && user ? (
               <>
-                <h2 className="text-white font-bold text-xl truncate">{displayName}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-white font-bold text-xl truncate">{displayName}</h2>
+                  {permissions?.role === 'admin' && (
+                    <span className="bg-red-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wide">
+                      Admin
+                    </span>
+                  )}
+                  {permissions?.role === 'leader' && (
+                    <span className="bg-yellow-500 text-slate-900 text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wide">
+                      Leader
+                    </span>
+                  )}
+                </div>
                 <p className="text-white/90 text-sm truncate mt-0.5">{user.email}</p>
-                <p className="text-white/70 text-xs mt-1">Ride In China · Data synced</p>
-                <button
-                  onClick={logout}
-                  className="mt-3 text-white/90 text-xs font-medium underline hover:text-white"
-                >
-                  Log out
-                </button>
+                <p className="text-white/70 text-xs mt-1">
+                  <i className="fa-solid fa-circle-check mr-1"></i>
+                  Data synced
+                </p>
               </>
             ) : (
               <>
@@ -434,6 +455,58 @@ const Me: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* 管理员功能区 & 账户设置 */}
+        {isAuthenticated && (
+          <section className="space-y-3">
+            <h3 className="text-slate-900 font-bold text-lg flex items-center gap-2">
+              <i className="fa-solid fa-gear text-orange-600"></i>
+              Account & Settings
+            </h3>
+
+            {/* 管理员面板快捷入口 */}
+            {(permissions?.role === 'admin' || permissions?.role === 'leader') && (
+              <button
+                onClick={() => {
+                  // 切换到 Admin 标签（需要通过父组件实现，这里用 window 事件模拟）
+                  const event = new CustomEvent('navigate-to-admin');
+                  window.dispatchEvent(event);
+                }}
+                className="w-full bg-gradient-to-r from-red-600 to-red-500 text-white p-4 rounded-2xl flex items-center justify-between shadow-lg active:scale-95 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <i className="fa-solid fa-shield-halved text-2xl"></i>
+                  </div>
+                  <div className="text-left">
+                    <div className="font-black text-base">管理员面板</div>
+                    <div className="text-white/80 text-xs mt-0.5">
+                      {permissions.role === 'admin' ? 'Full Admin Access' : 'Leader Access'}
+                    </div>
+                  </div>
+                </div>
+                <i className="fa-solid fa-chevron-right text-xl"></i>
+              </button>
+            )}
+
+            {/* 登出按钮 */}
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              className="w-full bg-slate-800 text-white p-4 rounded-2xl flex items-center justify-between active:scale-95 transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
+                  <i className="fa-solid fa-right-from-bracket text-xl"></i>
+                </div>
+                <div className="text-left">
+                  <div className="font-bold text-base">Log Out</div>
+                  <div className="text-slate-400 text-xs mt-0.5">Sign out of your account</div>
+                </div>
+              </div>
+              <i className="fa-solid fa-chevron-right text-lg"></i>
+            </button>
+          </section>
+        )}
       </div>
 
       {/* 隐藏的文件输入 */}
@@ -447,6 +520,47 @@ const Me: React.FC = () => {
 
       {/* 登录弹窗 */}
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
+
+      {/* 登出确认弹窗 */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i className="fa-solid fa-right-from-bracket text-orange-600 text-2xl"></i>
+              </div>
+              <h3 className="text-slate-900 font-black text-xl text-center mb-2">Log Out?</h3>
+              <p className="text-slate-600 text-sm text-center">
+                您确定要退出登录吗？本地数据已同步到服务器。
+              </p>
+            </div>
+
+            <div className="border-t border-slate-100 p-4 flex gap-3">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl active:scale-95 transition-all"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  setShowLogoutConfirm(false);
+                  logout();
+                }}
+                className="flex-1 bg-red-600 text-white font-bold py-3 rounded-xl active:scale-95 transition-all"
+              >
+                确认退出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
